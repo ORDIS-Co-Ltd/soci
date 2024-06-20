@@ -15,12 +15,16 @@ if(WIN32)
   if(NOT RTC_ARCH_X64)
     check_cxx_symbol_exists("_M_IX86" "" SOCI_TARGET_ARCH_X86)
   endif(NOT RTC_ARCH_X64)
+  check_cxx_symbol_exists("_M_ARM" "" SOCI_TARGET_ARCH_ARM)
+  check_cxx_symbol_exists("_M_ARM64" "" SOCI_TARGET_ARCH_ARM64)
+  
   # add check for arm here
   # see http://msdn.microsoft.com/en-us/library/b0084kay.aspx
 else(WIN32)
   check_cxx_symbol_exists("__i386__" "" SOCI_TARGET_ARCH_X86)
   check_cxx_symbol_exists("__x86_64__" "" SOCI_TARGET_ARCH_X64)
   check_cxx_symbol_exists("__arm__" "" SOCI_TARGET_ARCH_ARM)
+  check_cxx_symbol_exists("__aarch64__" "" SOCI_TARGET_ARCH_ARM64)
 endif(WIN32)
 
 if(NOT DEFINED LIB_SUFFIX)
