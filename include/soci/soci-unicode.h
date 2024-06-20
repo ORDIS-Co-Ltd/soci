@@ -1011,11 +1011,6 @@ namespace soci
      */
     inline std::string utf16_to_utf8_neon(const std::u16string &utf16)
     {
-      // if (!is_valid_utf16(utf16))
-      // {
-      //   throw soci_error("Invalid UTF-16 string");
-      // }
-
       std::string utf8;
       utf8.reserve(utf16.size() * 3); // Reserve space for the UTF-8 string to avoid reallocations
 
@@ -1033,7 +1028,9 @@ namespace soci
         // Create a mask to identify ASCII characters
         uint16x8_t ascii_mask = vcleq_u16(chunk, vdupq_n_u16(0x7F));
 
-        if (vmaxvq_u16(ascii_mask) == 0xFFFF)
+        // Check if all characters in the chunk are ASCII
+        uint64_t ascii_bitfield = vgetq_lane_u64(vreinterpretq_u64_u16(ascii_mask), 0);
+        if (ascii_bitfield == 0xFFFFFFFFFFFFFFFF)
         {
           // Handle up to 8 ASCII characters
           for (size_t i = 0; i < chunk_size; i++)
@@ -1055,12 +1052,8 @@ namespace soci
             }
             else if (c < 0x800)
             {
-              uint16x8_t ch = vdupq_n_u16(c);
-              uint16x8_t byte1 = vorrq_u16(vshrq_n_u16(ch, 6), vdupq_n_u16(0xC0));
-              uint16x8_t byte2 = vorrq_u16(vandq_u16(ch, vdupq_n_u16(0x3F)), vdupq_n_u16(0x80));
-
-              utf8.push_back(vgetq_lane_u8(vreinterpretq_u8_u16(byte1), 0));
-              utf8.push_back(vgetq_lane_u8(vreinterpretq_u8_u16(byte2), 0));
+              utf8.push_back(static_cast<char>(0xC0 | ((c >> 6) & 0x1F)));
+              utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
             }
             else if ((c >= 0xD800) && (c <= 0xDBFF))
             {
@@ -1080,14 +1073,9 @@ namespace soci
             }
             else
             {
-              uint16x8_t ch = vdupq_n_u16(c);
-              uint16x8_t byte1 = vorrq_u16(vshrq_n_u16(ch, 12), vdupq_n_u16(0xE0));
-              uint16x8_t byte2 = vorrq_u16(vandq_u16(vshrq_n_u16(ch, 6), vdupq_n_u16(0x3F)), vdupq_n_u16(0x80));
-              uint16x8_t byte3 = vorrq_u16(vandq_u16(ch, vdupq_n_u16(0x3F)), vdupq_n_u16(0x80));
-
-              utf8.push_back(vgetq_lane_u8(vreinterpretq_u8_u16(byte1), 0));
-              utf8.push_back(vgetq_lane_u8(vreinterpretq_u8_u16(byte2), 0));
-              utf8.push_back(vgetq_lane_u8(vreinterpretq_u8_u16(byte3), 0));
+              utf8.push_back(static_cast<char>(0xE0 | ((c >> 12) & 0x0F)));
+              utf8.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+              utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
             }
           }
         }
