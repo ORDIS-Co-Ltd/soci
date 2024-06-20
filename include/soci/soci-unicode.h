@@ -323,7 +323,7 @@ namespace soci
         if (bitfield == 0xFFFF)
         {
           // All characters in the chunk are ASCII
-          for (int i = 0; i < 16; ++i)
+          for (std::size_t i = 0; i < 16; ++i)
           {
             utf16.push_back(static_cast<char16_t>(src[i]));
           }
@@ -332,7 +332,7 @@ namespace soci
         else
         {
           // Handle non-ASCII characters and remaining bytes
-          int i = 0;
+          std::size_t i = 0;
           while (i < chunk_size)
           {
             unsigned char c1 = static_cast<unsigned char>(src[i]);
