@@ -207,7 +207,7 @@ function(check_and_add_flag flag define)
 endfunction()
 
 # Check for SSE 4.2 support
-if (MSVC)
+if (MSVC AND SOCI_TARGET_ARCH_X64)
     add_definitions(-DSOCI_USE_SSE_4_2)
     message(STATUS "SSE 4.2 support enabled (MSVC default)")
 else()
@@ -215,10 +215,12 @@ else()
 endif()
 
 # Check for ARM NEON support
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64*")
+if (SOCI_TARGET_ARCH_ARM64)
     # NEON is enabled by default on ARM64
     add_definitions(-DSOCI_USE_NEON)
     message(STATUS "ARM NEON support enabled")
+elseif(SOCI_TARGET_ARCH_ARM)
+    check_and_add_flag("-mfpu=neon" "-DSOCI_USE_NEON")
 endif()
 
 ###############################################################################
