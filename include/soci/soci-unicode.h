@@ -902,11 +902,6 @@ namespace soci
      */
     inline std::u16string utf8_to_utf16_neon(const std::string &utf8)
     {
-      if (!is_valid_utf8(utf8))
-      {
-        throw soci_error("Invalid UTF-8 string");
-      }
-
       std::u16string utf16;
       utf16.reserve(utf8.size());
 
@@ -936,7 +931,8 @@ namespace soci
         }
         else
         {
-          for (size_t i = 0; i < chunk_size;)
+          size_t i = 0;
+          while (i < chunk_size)
           {
             unsigned char c1 = static_cast<unsigned char>(src[i]);
 
@@ -996,7 +992,7 @@ namespace soci
               throw soci_error("Invalid UTF-8 sequence");
             }
           }
-          src += chunk_size;
+          src += i;
         }
       }
 
@@ -1015,10 +1011,10 @@ namespace soci
      */
     inline std::string utf16_to_utf8_neon(const std::u16string &utf16)
     {
-      if (!is_valid_utf16(utf16))
-      {
-        throw soci_error("Invalid UTF-16 string");
-      }
+      // if (!is_valid_utf16(utf16))
+      // {
+      //   throw soci_error("Invalid UTF-16 string");
+      // }
 
       std::string utf8;
       utf8.reserve(utf16.size() * 3); // Reserve space for the UTF-8 string to avoid reallocations
@@ -1446,7 +1442,8 @@ namespace soci
       return utf8;
     }
 
-#else
+// #else
+#endif
 
     /**
      * @brief Converts a UTF-8 encoded string to a UTF-16 encoded string.
@@ -1857,7 +1854,7 @@ namespace soci
       return utf8;
     }
 
-#endif
+    // #endif
 
     /* Wrappers for the conversion functions that select the appropriate implementation based on
     platform capabilities */
@@ -1877,7 +1874,7 @@ namespace soci
     {
 #if defined(SOCI_USE_SSE_4_2)
       return utf8_to_utf16_sse42(utf8);
-#elif defined(SOCI_USE_NEON)
+#elif defined(SOCI_USE_NEON) // && (0)
       return utf8_to_utf16_neon(utf8);
 #else
       return utf8_to_utf16_fallback(utf8);
@@ -1899,7 +1896,7 @@ namespace soci
     {
 #if defined(SOCI_USE_SSE_4_2)
       return utf16_to_utf8_sse42(utf16);
-#elif defined(SOCI_USE_NEON)
+#elif defined(SOCI_USE_NEON) //&& (0)
       return utf16_to_utf8_neon(utf16);
 #else
       return utf16_to_utf8_fallback(utf16);
