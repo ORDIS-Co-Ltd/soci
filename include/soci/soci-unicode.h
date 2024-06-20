@@ -308,102 +308,102 @@ namespace soci
         size_t remaining = end - src;
         size_t chunk_size = remaining < 16 ? remaining : 16;
 
-        // Load 16 bytes of data from the source string
-        __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(src));
-
-        // Create a mask to identify ASCII characters (0x80 bit is not set)
-        __m128i mask = _mm_set1_epi8(static_cast<int8_t>(0x80));
-        __m128i result = _mm_cmpeq_epi8(_mm_and_si128(chunk, mask), _mm_setzero_si128());
-
-        // Create a bitfield where each bit represents whether the corresponding byte is ASCII
-        int bitfield = _mm_movemask_epi8(result);
-
-        if (bitfield == 0xFFFF)
+        if (chunk_size == 16)
         {
-          // All characters in the chunk are ASCII
-          for (std::size_t i = 0; i < 16; ++i)
+          // Load 16 bytes of data from the source string
+          __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(src));
+
+          // Create a mask to identify ASCII characters (0x80 bit is not set)
+          __m128i mask = _mm_set1_epi8(static_cast<int8_t>(0x80));
+          __m128i result = _mm_cmpeq_epi8(_mm_and_si128(chunk, mask), _mm_setzero_si128());
+
+          // Create a bitfield where each bit represents whether the corresponding byte is ASCII
+          int bitfield = _mm_movemask_epi8(result);
+
+          if (bitfield == 0xFFFF)
           {
-            utf16.push_back(static_cast<char16_t>(src[i]));
+            // All characters in the chunk are ASCII
+            for (int i = 0; i < 16; ++i)
+            {
+              utf16.push_back(static_cast<char16_t>(src[i]));
+            }
+            src += 16;
+            continue;
           }
-          src += 16;
         }
-        else
+
+        // Handle non-ASCII characters and remaining bytes
+        while (src < end)
         {
-          // Handle non-ASCII characters and remaining bytes
-          std::size_t i = 0;
-          while (i < chunk_size)
+          unsigned char c1 = static_cast<unsigned char>(*src);
+
+          if (c1 < 0x80)
           {
-            unsigned char c1 = static_cast<unsigned char>(src[i]);
+            // 1-byte sequence (ASCII)
+            utf16.push_back(static_cast<char16_t>(c1));
+            ++src;
+          }
+          else if ((c1 & 0xE0) == 0xC0)
+          {
+            // 2-byte sequence
+            if (src + 1 >= end)
+              throw soci_error("Invalid UTF-8 sequence (truncated 2-byte sequence)");
 
-            if (c1 < 0x80)
+            unsigned char c2 = static_cast<unsigned char>(*(src + 1));
+            if ((c2 & 0xC0) != 0x80)
+              throw soci_error("Invalid UTF-8 sequence");
+
+            utf16.push_back(static_cast<char16_t>(((c1 & 0x1F) << 6) | (c2 & 0x3F)));
+            src += 2;
+          }
+          else if ((c1 & 0xF0) == 0xE0)
+          {
+            // 3-byte sequence
+            if (src + 2 >= end)
+              throw soci_error("Invalid UTF-8 sequence (truncated 3-byte sequence)");
+
+            unsigned char c2 = static_cast<unsigned char>(*(src + 1));
+            unsigned char c3 = static_cast<unsigned char>(*(src + 2));
+            if ((c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
+              throw soci_error("Invalid UTF-8 sequence");
+
+            utf16.push_back(static_cast<char16_t>(((c1 & 0x0F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F)));
+            src += 3;
+          }
+          else if ((c1 & 0xF8) == 0xF0)
+          {
+            // 4-byte sequence
+            if (src + 3 >= end)
+              throw soci_error("Invalid UTF-8 sequence (truncated 4-byte sequence)");
+
+            unsigned char c2 = static_cast<unsigned char>(*(src + 1));
+            unsigned char c3 = static_cast<unsigned char>(*(src + 2));
+            unsigned char c4 = static_cast<unsigned char>(*(src + 3));
+            if ((c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80 || (c4 & 0xC0) != 0x80)
+              throw soci_error("Invalid UTF-8 sequence");
+
+            uint32_t codepoint = ((c1 & 0x07) << 18) | ((c2 & 0x3F) << 12) | ((c3 & 0x3F) << 6) | (c4 & 0x3F);
+
+            if (codepoint > 0x10FFFF)
+              throw soci_error("Invalid UTF-8 codepoint");
+
+            if (codepoint <= 0xFFFF)
             {
-              // 1-byte sequence (ASCII)
-              utf16.push_back(static_cast<char16_t>(c1));
-              ++i;
-            }
-            else if ((c1 & 0xE0) == 0xC0)
-            {
-              // 2-byte sequence
-              if (i + 1 >= chunk_size || src + 1 >= end)
-                throw soci_error("Invalid UTF-8 sequence (truncated 2-byte sequence)");
-
-              unsigned char c2 = static_cast<unsigned char>(src[i + 1]);
-              if ((c2 & 0xC0) != 0x80)
-                throw soci_error("Invalid UTF-8 sequence (invalid continuation byte in 2-byte sequence)");
-
-              utf16.push_back(static_cast<char16_t>(((c1 & 0x1F) << 6) | (c2 & 0x3F)));
-              i += 2;
-            }
-            else if ((c1 & 0xF0) == 0xE0)
-            {
-              // 3-byte sequence
-              if (i + 2 >= chunk_size || src + 2 >= end)
-                throw soci_error("Invalid UTF-8 sequence (truncated 3-byte sequence)");
-
-              unsigned char c2 = static_cast<unsigned char>(src[i + 1]);
-              unsigned char c3 = static_cast<unsigned char>(src[i + 2]);
-              if ((c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
-                throw soci_error("Invalid UTF-8 sequence (invalid continuation bytes in 3-byte sequence)");
-
-              utf16.push_back(static_cast<char16_t>(((c1 & 0x0F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F)));
-              i += 3;
-            }
-            else if ((c1 & 0xF8) == 0xF0)
-            {
-              // 4-byte sequence
-              if (i + 3 >= chunk_size || src + 3 >= end)
-                throw soci_error("Invalid UTF-8 sequence (truncated 4-byte sequence)");
-
-              unsigned char c2 = static_cast<unsigned char>(src[i + 1]);
-              unsigned char c3 = static_cast<unsigned char>(src[i + 2]);
-              unsigned char c4 = static_cast<unsigned char>(src[i + 3]);
-              if ((c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80 || (c4 & 0xC0) != 0x80)
-                throw soci_error("Invalid UTF-8 sequence (invalid continuation bytes in 4-byte sequence)");
-
-              uint32_t codepoint = ((c1 & 0x07) << 18) | ((c2 & 0x3F) << 12) | ((c3 & 0x3F) << 6) | (c4 & 0x3F);
-
-              if (codepoint > 0x10FFFF)
-                throw soci_error("Invalid UTF-8 codepoint");
-
-              if (codepoint <= 0xFFFF)
-              {
-                utf16.push_back(static_cast<char16_t>(codepoint));
-              }
-              else
-              {
-                // Encode as a surrogate pair
-                codepoint -= 0x10000;
-                utf16.push_back(static_cast<char16_t>((codepoint >> 10) + 0xD800));
-                utf16.push_back(static_cast<char16_t>((codepoint & 0x3FF) + 0xDC00));
-              }
-              i += 4;
+              utf16.push_back(static_cast<char16_t>(codepoint));
             }
             else
             {
-              throw soci_error("Invalid UTF-8 sequence");
+              // Encode as a surrogate pair
+              codepoint -= 0x10000;
+              utf16.push_back(static_cast<char16_t>((codepoint >> 10) + 0xD800));
+              utf16.push_back(static_cast<char16_t>((codepoint & 0x3FF) + 0xDC00));
             }
+            src += 4;
           }
-          src += i;
+          else
+          {
+            throw soci_error("Invalid UTF-8 sequence");
+          }
         }
       }
 
@@ -1462,10 +1462,10 @@ namespace soci
     inline std::u16string utf8_to_utf16_fallback(const std::string &utf8)
     {
       // If valid UTF-8 validation is required before conversion:
-      if (!is_valid_utf8(utf8))
-      {
-        throw soci_error("Invalid UTF-8 string");
-      }
+      // if (!is_valid_utf8(utf8))
+      // {
+      //   throw soci_error("Invalid UTF-8 string");
+      // }
 
       std::u16string utf16;
       utf16.reserve(utf8.size());
