@@ -7,11 +7,9 @@
 #include <wchar.h>
 
 // Include necessary headers based on the platform's capabilities for SIMD instructions
-#if defined(__SSE4_2__) || (defined(_MSC_VER) && defined(_M_X64))
-#define SOCI_UNICODE_USE_SSE42
+#if defined(SOCI_USE_SSE_4_2) || (defined(_MSC_VER) && defined(_M_X64))
 #include <nmmintrin.h> // SSE4.2 intrinsics
-#elif defined(__ARM_NEON) || (defined(_M_ARM64) && defined(_MSC_VER))
-#define SOCI_UNICODE_USE_NEON
+#elif defined(SOCI_USE_NEON) || (defined(_M_ARM64) && defined(_MSC_VER))
 #include <arm_neon.h>
 #endif
 
@@ -25,7 +23,7 @@ namespace soci
   namespace details
   {
 
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
 
     /**
      * @brief Checks if a given sequence of bytes is a valid UTF-8 sequence.
@@ -66,7 +64,7 @@ namespace soci
       }
     }
 
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
 
     /**
      * @brief Checks if a given sequence of bytes is a valid UTF-8 sequence.
@@ -156,9 +154,9 @@ namespace soci
      */
     inline bool is_valid_utf8_sequence(const unsigned char *bytes, int length)
     {
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
       return is_valid_utf8_sequence_sse42(bytes, length);
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
       return is_valid_utf8_sequence_neon(bytes, length);
 #else
       return is_valid_utf8_sequence_fallback(bytes, length);
@@ -283,7 +281,7 @@ namespace soci
     // The following functions use SIMD instructions to optimize the conversion process.
     // If these instructions are not available, fallback functions are used instead.
 
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
 
     /**
      * @brief Converts a UTF-8 encoded string to a UTF-16 encoded string using SSE4.2 intrinsics.
@@ -889,7 +887,7 @@ namespace soci
       return utf32;
     }
 
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
 
     /**
      * @brief Converts a UTF-8 encoded string to a UTF-16 encoded string using NEON intrinsics.
@@ -1877,9 +1875,9 @@ namespace soci
      */
     inline std::u16string utf8_to_utf16(const std::string &utf8)
     {
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
       return utf8_to_utf16_sse42(utf8);
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
       return utf8_to_utf16_neon(utf8);
 #else
       return utf8_to_utf16_fallback(utf8);
@@ -1899,9 +1897,9 @@ namespace soci
      */
     inline std::string utf16_to_utf8(const std::u16string &utf16)
     {
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
       return utf16_to_utf8_sse42(utf16);
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
       return utf16_to_utf8_neon(utf16);
 #else
       return utf16_to_utf8_fallback(utf16);
@@ -1921,9 +1919,9 @@ namespace soci
      */
     inline std::u32string utf16_to_utf32(const std::u16string &utf16)
     {
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
       return utf16_to_utf32_sse42(utf16);
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
       return utf16_to_utf32_neon(utf16);
 #else
       return utf16_to_utf32_fallback(utf16);
@@ -1943,9 +1941,9 @@ namespace soci
      */
     inline std::u16string utf32_to_utf16(const std::u32string &utf32)
     {
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
       return utf32_to_utf16_sse42(utf32);
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
       return utf32_to_utf16_neon(utf32);
 #else
       return utf32_to_utf16_fallback(utf32);
@@ -1965,9 +1963,9 @@ namespace soci
      */
     inline std::u32string utf8_to_utf32(const std::string &utf8)
     {
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
       return utf8_to_utf32_sse42(utf8);
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
       return utf8_to_utf32_neon(utf8);
 #else
       return utf8_to_utf32_fallback(utf8);
@@ -1987,9 +1985,9 @@ namespace soci
      */
     inline std::string utf32_to_utf8(const std::u32string &utf32)
     {
-#if defined(SOCI_UNICODE_USE_SSE42)
+#if defined(SOCI_USE_SSE_4_2)
       return utf32_to_utf8_sse42(utf32);
-#elif defined(SOCI_UNICODE_USE_NEON)
+#elif defined(SOCI_USE_NEON)
       return utf32_to_utf8_neon(utf32);
 #else
       return utf32_to_utf8_fallback(utf32);

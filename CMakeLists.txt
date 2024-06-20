@@ -192,6 +192,36 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   INCLUDE_DIRECTORIES ${SOCI_INCLUDE_DIRS})
 
 ###############################################################################
+# Check for SSE 4.2 and ARM NEON support
+###############################################################################
+include(CheckCXXCompilerFlag)
+
+# Function to check and add compiler flags
+function(check_and_add_flag flag define)
+    check_cxx_compiler_flag("${flag}" FLAG_SUPPORTED)
+    if (FLAG_SUPPORTED)
+        add_definitions("${define}")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${flag}")
+        message(STATUS "${flag} is supported and enabled via ${define}")
+    endif()
+endfunction()
+
+# Check for SSE 4.2 support
+if (MSVC)
+    add_definitions(-DSOCI_USE_SSE_4_2)
+    message(STATUS "SSE 4.2 support enabled (MSVC default)")
+else()
+    check_and_add_flag("-msse4.2" "-DSOCI_USE_SSE_4_2")
+endif()
+
+# Check for ARM NEON support
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64*")
+    # NEON is enabled by default on ARM64
+    add_definitions(-DSOCI_USE_NEON)
+    message(STATUS "ARM NEON support enabled")
+endif()
+
+###############################################################################
 # Installation
 ###############################################################################
 
