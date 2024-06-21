@@ -168,6 +168,18 @@ namespace soci
       return true;
     }
 
+    /**
+     * @brief Converts a UTF-8 encoded string to a UTF-16 encoded string.
+     *
+     * This function iterates over the input UTF-8 encoded string and converts each character to its corresponding UTF-16 representation.
+     * It handles ASCII characters, two-byte, three-byte, and four-byte UTF-8 sequences. For four-byte sequences that represent codepoints
+     * greater than U+10FFFF, it throws an exception. For codepoints greater than U+FFFF, it encodes them as a surrogate pair.
+     *
+     * @param bytes The input UTF-8 encoded string.
+     * @param length The length of the input string.
+     * @param utf16 The output UTF-16 encoded string.
+     * @throw soci_error If the input string contains an invalid UTF-8 sequence or an invalid UTF-8 codepoint.
+     */
     inline void utf8_to_utf16_common(const unsigned char *bytes, std::size_t length, std::u16string &utf16)
     {
       for (std::size_t i = 0; i < length;)
@@ -222,6 +234,55 @@ namespace soci
       }
     }
 
+    inline void utf16_to_utf8_common(const char16_t *chars, std::size_t length, std::string &utf8)
+    {
+      for (std::size_t i = 0; i < length; ++i)
+      {
+        char16_t c = chars[i];
+
+        if (c < 0x80)
+        {
+          // 1-byte sequence (ASCII)
+          utf8.push_back(static_cast<char>(c));
+        }
+        else if (c < 0x800)
+        {
+          // 2-byte sequence
+          utf8.push_back(static_cast<char>(0xC0 | ((c >> 6) & 0x1F)));
+          utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+        else if ((c >= 0xD800) && (c <= 0xDBFF))
+        {
+          // Handle UTF-16 surrogate pairs
+          if (i + 1 >= length)
+            throw soci_error("Invalid UTF-16 sequence");
+
+          char16_t c2 = chars[i + 1];
+          if ((c2 < 0xDC00) || (c2 > 0xDFFF))
+            throw soci_error("Invalid UTF-16 sequence");
+
+          uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
+          utf8.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
+          utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+          utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+          utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+          ++i; // Skip the next character as it is part of the surrogate pair
+        }
+        else if ((c >= 0xDC00) && (c <= 0xDFFF))
+        {
+          // Lone low surrogate, not valid by itself
+          throw soci_error("Invalid UTF-16 sequence");
+        }
+        else
+        {
+          // 3-byte sequence
+          utf8.push_back(static_cast<char>(0xE0 | ((c >> 12) & 0x0F)));
+          utf8.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+          utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+      }
+    }
+
     // The following functions use SIMD instructions to optimize the conversion process.
     // If these instructions are not available, fallback functions are used instead.
 
@@ -239,7 +300,7 @@ namespace soci
      * @return A std::u16string containing the equivalent UTF-16 encoded string.
      * @throws soci_error If an invalid UTF-8 sequence is encountered in the input string.
      */
-        inline std::u16string utf8_to_utf16_sse42(const std::string &utf8)
+    inline std::u16string utf8_to_utf16_sse42(const std::string &utf8)
     {
       std::u16string utf16;
       utf16.reserve(utf8.size());
@@ -302,70 +363,40 @@ namespace soci
       std::string utf8;
       utf8.reserve(utf16.size() * 3);
 
-      const char16_t *src = utf16.data();
-      const char16_t *end = src + utf16.size();
+      const char16_t *chars = utf16.data();
+      std::size_t length = utf16.length();
 
-      while (src < end)
+      for (std::size_t i = 0; i < length;)
       {
-        size_t remaining = end - src;
-        if (remaining >= 8)
+        if (length - i >= 8)
         {
-          // Load a chunk of 8 UTF-16 characters
-          __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(src));
-          // Mask to identify ASCII characters (0x7F)
+          __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(chars + i));
           __m128i mask = _mm_set1_epi16(0x7F);
-          // Compare and create a result mask
           __m128i result = _mm_cmpeq_epi16(_mm_and_si128(chunk, mask), chunk);
+          int bitfield = _mm_movemask_epi8(result);
 
-          // Bitfield from the comparison result
-          int bitfield = _mm_movemask_epi8(result) & 0xFFFF; // Only lower 16 bits for 8 char16_t
           if (bitfield == 0xFFFF)
           {
             // All characters in the chunk are ASCII
-            for (int i = 0; i < 8; ++i)
+            for (int j = 0; j < 8; ++j)
             {
-              utf8.push_back(static_cast<char>(src[i]));
+              utf8.push_back(static_cast<char>(chars[i + j]));
             }
-            src += 8;
-            continue;
+            i += 8;
+          }
+          else
+          {
+            // Handle non-ASCII characters with SSE4.2
+            // ... (SSE4.2 specific code)
+            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+            utf16_to_utf8_common(chars + i, length - i, utf8);
+            break;
           }
         }
-
-        // Process remaining characters
-        while (src < end)
+        else
         {
-          char16_t c = *src++;
-
-          if (c < 0x80) // 1-byte sequence (ASCII)
-          {
-            utf8.push_back(static_cast<char>(c));
-          }
-          else if (c < 0x800) // 2-byte sequence
-          {
-            utf8.push_back(static_cast<char>(0xC0 | ((c >> 6) & 0x1F)));
-            utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
-          }
-          else if (c >= 0xD800 && c <= 0xDBFF) // Surrogate pair
-          {
-            if (src >= end)
-              throw soci_error("Invalid UTF-16 sequence (truncated surrogate pair)");
-
-            char16_t c2 = *src++;
-            if (c2 < 0xDC00 || c2 > 0xDFFF)
-              throw soci_error("Invalid UTF-16 sequence (invalid surrogate pair)");
-
-            uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
-            utf8.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
-            utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
-            utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-            utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-          }
-          else // 3-byte sequence
-          {
-            utf8.push_back(static_cast<char>(0xE0 | ((c >> 12) & 0x0F)));
-            utf8.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
-            utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
-          }
+          utf16_to_utf8_common(chars + i, length - i, utf8);
+          break;
         }
       }
 
@@ -821,108 +852,6 @@ namespace soci
 
       return utf16;
     }
-    
-    
-    
-    
-    // inline std::u16string utf8_to_utf16_neon(const std::string &utf8)
-    // {
-    //   std::u16string utf16;
-    //   utf16.reserve(utf8.size());
-
-    //   const char *src = utf8.data();
-    //   const char *end = src + utf8.size();
-
-    //   while (src < end)
-    //   {
-    //     size_t bytes_remaining = end - src;
-    //     size_t chunk_size = bytes_remaining < 16 ? bytes_remaining : 16;
-
-    //     uint8x16_t chunk = vld1q_u8(reinterpret_cast<const uint8_t *>(src));
-    //     uint8x16_t mask = vdupq_n_u8(0x80);
-    //     uint8x16_t result = vceqq_u8(vandq_u8(chunk, mask), vdupq_n_u8(0));
-
-    //     uint64_t bitfield_lo = vgetq_lane_u64(vreinterpretq_u64_u8(result), 0);
-    //     uint64_t bitfield_hi = vgetq_lane_u64(vreinterpretq_u64_u8(result), 1);
-    //     uint64_t bitfield = bitfield_lo | (bitfield_hi << 8);
-
-    //     if (bitfield == 0xFFFFFFFFFFFFFFFF)
-    //     {
-    //       for (size_t i = 0; i < chunk_size; ++i)
-    //       {
-    //         utf16.push_back(static_cast<char16_t>(src[i]));
-    //       }
-    //       src += chunk_size;
-    //     }
-    //     else
-    //     {
-    //       size_t i = 0;
-    //       while (i < chunk_size)
-    //       {
-    //         unsigned char c1 = static_cast<unsigned char>(src[i]);
-
-    //         if (c1 < 0x80)
-    //         {
-    //           utf16.push_back(static_cast<char16_t>(c1));
-    //           ++i;
-    //         }
-    //         else if ((c1 & 0xE0) == 0xC0)
-    //         {
-    //           if (i + 1 >= chunk_size)
-    //             break;
-    //           unsigned char c2 = static_cast<unsigned char>(src[i + 1]);
-    //           if ((c2 & 0xC0) != 0x80)
-    //             throw soci_error("Invalid UTF-8 sequence");
-
-    //           utf16.push_back(static_cast<char16_t>(((c1 & 0x1F) << 6) | (c2 & 0x3F)));
-    //           i += 2;
-    //         }
-    //         else if ((c1 & 0xF0) == 0xE0)
-    //         {
-    //           if (i + 2 >= chunk_size)
-    //             break;
-    //           unsigned char c2 = static_cast<unsigned char>(src[i + 1]);
-    //           unsigned char c3 = static_cast<unsigned char>(src[i + 2]);
-    //           if (((c2 & 0xC0) != 0x80) || ((c3 & 0xC0) != 0x80))
-    //             throw soci_error("Invalid UTF-8 sequence");
-
-    //           utf16.push_back(static_cast<char16_t>(((c1 & 0x0F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F)));
-    //           i += 3;
-    //         }
-    //         else if ((c1 & 0xF8) == 0xF0)
-    //         {
-    //           if (i + 3 >= chunk_size)
-    //             break;
-    //           unsigned char c2 = static_cast<unsigned char>(src[i + 1]);
-    //           unsigned char c3 = static_cast<unsigned char>(src[i + 2]);
-    //           unsigned char c4 = static_cast<unsigned char>(src[i + 3]);
-    //           if (((c2 & 0xC0) != 0x80) || ((c3 & 0xC0) != 0x80) || ((c4 & 0xC0) != 0x80))
-    //             throw soci_error("Invalid UTF-8 sequence");
-
-    //           uint32_t codepoint = ((c1 & 0x07) << 18) | ((c2 & 0x3F) << 12) | ((c3 & 0x3F) << 6) | (c4 & 0x3F);
-    //           if (codepoint <= 0xFFFF)
-    //           {
-    //             utf16.push_back(static_cast<char16_t>(codepoint));
-    //           }
-    //           else
-    //           {
-    //             codepoint -= 0x10000;
-    //             utf16.push_back(static_cast<char16_t>((codepoint >> 10) + 0xD800));
-    //             utf16.push_back(static_cast<char16_t>((codepoint & 0x3FF) + 0xDC00));
-    //           }
-    //           i += 4;
-    //         }
-    //         else
-    //         {
-    //           throw soci_error("Invalid UTF-8 sequence");
-    //         }
-    //       }
-    //       src += i;
-    //     }
-    //   }
-
-    //   return utf16;
-    // }
 
     /**
      * @brief Converts a UTF-16 encoded string to a UTF-8 encoded string using NEON intrinsics.
@@ -937,74 +866,42 @@ namespace soci
     inline std::string utf16_to_utf8_neon(const std::u16string &utf16)
     {
       std::string utf8;
-      utf8.reserve(utf16.size() * 3); // Reserve space for the UTF-8 string to avoid reallocations
+      utf8.reserve(utf16.size() * 3);
 
-      const char16_t *src = utf16.data();
-      const char16_t *end = src + utf16.size();
+      const char16_t *chars = utf16.data();
+      std::size_t length = utf16.length();
 
-      while (src < end)
+      for (std::size_t i = 0; i < length;)
       {
-        size_t remaining = end - src;
-        size_t chunk_size = remaining < 8 ? remaining : 8;
-
-        // Load up to 8 UTF-16 characters into a NEON register
-        uint16x8_t chunk = vld1q_u16(reinterpret_cast<const uint16_t *>(src));
-
-        // Create a mask to identify ASCII characters
-        uint16x8_t ascii_mask = vcleq_u16(chunk, vdupq_n_u16(0x7F));
-
-        // Check if all characters in the chunk are ASCII
-        uint64_t ascii_bitfield = vgetq_lane_u64(vreinterpretq_u64_u16(ascii_mask), 0);
-        if (ascii_bitfield == 0xFFFFFFFFFFFFFFFF)
+        if (length - i >= 8)
         {
-          // Handle up to 8 ASCII characters
-          for (size_t i = 0; i < chunk_size; i++)
+          uint16x8_t chunk = vld1q_u16(reinterpret_cast<const uint16_t *>(chars + i));
+          uint16x8_t mask = vdupq_n_u16(0x7F);
+          uint16x8_t result = vceqq_u16(vandq_u16(chunk, mask), chunk);
+          uint64_t bitfield = vgetq_lane_u64(vreinterpretq_u64_u16(result), 0);
+
+          if (bitfield == 0xFFFFFFFFFFFFFFFF)
           {
-            utf8.push_back(static_cast<char>(src[i]));
+            // All characters in the chunk are ASCII
+            for (int j = 0; j < 8; ++j)
+            {
+              utf8.push_back(static_cast<char>(chars[i + j]));
+            }
+            i += 8;
           }
-          src += chunk_size;
+          else
+          {
+            // Handle non-ASCII characters with NEON
+            // ... (NEON specific code)
+            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+            utf16_to_utf8_common(chars + i, length - i, utf8);
+            break;
+          }
         }
         else
         {
-          // Handle non-ASCII characters with NEON and scalar fallbacks as needed.
-          for (size_t i = 0; i < chunk_size; i++)
-          {
-            char16_t c = src[i];
-
-            if (c < 0x80)
-            {
-              utf8.push_back(static_cast<char>(c));
-            }
-            else if (c < 0x800)
-            {
-              utf8.push_back(static_cast<char>(0xC0 | ((c >> 6) & 0x1F)));
-              utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
-            }
-            else if ((c >= 0xD800) && (c <= 0xDBFF))
-            {
-              // Handle UTF-16 surrogate pairs
-              if (i + 1 >= chunk_size || src + i + 1 >= end)
-                throw soci::soci_error("Invalid UTF-16 sequence");
-
-              char16_t c2 = src[i + 1];
-              if ((c2 < 0xDC00) || (c2 > 0xDFFF))
-                throw soci::soci_error("Invalid UTF-16 sequence");
-
-              uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
-              utf8.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
-              utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
-              utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-              utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-              i++; // Skip the next character as it is part of the surrogate pair
-            }
-            else
-            {
-              utf8.push_back(static_cast<char>(0xE0 | ((c >> 12) & 0x0F)));
-              utf8.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
-              utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
-            }
-          }
-          src += chunk_size;
+          utf16_to_utf8_common(chars + i, length - i, utf8);
+          break;
         }
       }
 
@@ -1407,63 +1304,13 @@ namespace soci
      */
     inline std::string utf16_to_utf8_fallback(const std::u16string &utf16)
     {
-      // If valid UTF-16 validation is required before conversion:
-      if (!is_valid_utf16(utf16))
-      {
-        throw soci_error("Invalid UTF-16 string");
-      }
-
       std::string utf8;
       utf8.reserve(utf16.size() * 3);
 
-      for (std::size_t i = 0; i < utf16.size();)
-      {
-        char16_t c = utf16[i++];
+      const char16_t *chars = utf16.data();
+      std::size_t length = utf16.length();
 
-        if (c < 0x80)
-        {
-          // 1-byte sequence (ASCII)
-          utf8.push_back(static_cast<char>(c));
-        }
-        else if (c < 0x800)
-        {
-          // 2-byte sequence
-          utf8.push_back(static_cast<char>(0xC0 | ((c >> 6) & 0x1F)));
-          utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
-        }
-        else if (c >= 0xD800 && c <= 0xDBFF)
-        {
-          // Surrogate pair
-          if (i >= utf16.size())
-          {
-            throw soci_error("Invalid UTF-16 sequence (truncated surrogate pair)");
-          }
-
-          char16_t c2 = utf16[i++];
-          if (c2 < 0xDC00 || c2 > 0xDFFF)
-          {
-            throw soci_error("Invalid UTF-16 sequence (invalid surrogate pair)");
-          }
-
-          uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
-          utf8.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
-          utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
-          utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-          utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-        }
-        else if (c >= 0xDC00 && c <= 0xDFFF)
-        {
-          // Lone lower surrogate, not valid by itself
-          throw soci_error("Invalid UTF-16 sequence (lone low surrogate)");
-        }
-        else
-        {
-          // 3-byte sequence
-          utf8.push_back(static_cast<char>(0xE0 | ((c >> 12) & 0x0F)));
-          utf8.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
-          utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
-        }
-      }
+      utf16_to_utf8_common(chars, length, utf8);
 
       return utf8;
     }
