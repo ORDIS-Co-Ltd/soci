@@ -456,6 +456,12 @@ TEST_CASE("UTF-32 to UTF-8 conversion tests", "[unicode]") {
     // Invalid conversion (should throw an exception)
     std::u32string invalid_utf32 = U"\x110000"; // Invalid code point
     REQUIRE_THROWS_AS(utf32_to_utf8(invalid_utf32), soci::soci_error);
+    
+    // Invalid conversion (should throw an exception)
+    std::u32string invalid_wide;
+    invalid_wide.push_back(0xD800); // lone high surrogate
+    REQUIRE_THROWS_AS(utf32_to_utf8(invalid_wide), soci::soci_error);
+    
 }
 
 TEST_CASE("UTF-8 to wide string conversion tests", "[unicode]") {
