@@ -1251,26 +1251,26 @@ namespace soci
      * @return std::string The output UTF-8 encoded string.
      * @throw soci_error If the input UTF-32 string contains invalid code points.
      */
-    inline std::string utf32_to_utf8_neon(const std::u32string &utf32)
+inline std::string utf32_to_utf8_neon(const std::u32string &utf32)
+{
+    // Check if the input UTF-32 string contains only valid code points
+    if (!is_valid_utf32(utf32))
     {
-      // Check if the input UTF-32 string contains only valid code points
-      if (!is_valid_utf32(utf32))
-      {
         throw soci_error("Invalid UTF-32 string");
-      }
+    }
 
-      // Initialize the output UTF-8 string
-      std::string utf8;
-      // Reserve enough space for the output string to avoid reallocations
-      utf8.reserve(utf32.size() * 4);
+    // Initialize the output UTF-8 string
+    std::string utf8;
+    // Reserve enough space for the output string to avoid reallocations
+    utf8.reserve(utf32.size() * 4);
 
-      // Get pointers to the start and end of the input UTF-32 string
-      auto *src = reinterpret_cast<const uint32_t *>(utf32.data());
-      auto *end = src + utf32.size();
+    // Get pointers to the start and end of the input UTF-32 string
+    auto *src = reinterpret_cast<const uint32_t *>(utf32.data());
+    auto *end = src + utf32.size();
 
-      // Process the input UTF-32 string in chunks of 4 code points
-      while (src < end)
-      {
+    // Process the input UTF-32 string in chunks of 4 code points
+    while (src < end)
+    {
         // Load 4 UTF-32 code points into a NEON register
         uint32x4_t chunk = vld1q_u32(src);
         // Set a threshold value to determine if a code point is ASCII or not
@@ -1286,41 +1286,47 @@ namespace soci
         // If all code points in the chunk are ASCII, process them en-bloc
         if (combined == 0)
         {
-          for (int i = 0; i < 4 && src < end; ++i)
-            utf8.push_back(static_cast<char>(*src++));
+            for (int i = 0; i < 4 && src < end; ++i)
+            {
+                utf8.push_back(static_cast<char>(*src++));
+            }
         }
         // Otherwise, process each code point individually
         else
         {
-          for (int i = 0; i < 4 && src < end; ++i, ++src)
-          {
-            uint32_t codepoint = *src;
-            // Convert the code point to UTF-8 and append it to the output string
-            if (codepoint < 0x800)
+            for (int i = 0; i < 4 && src < end; ++i, ++src)
             {
-              utf8.push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
-              utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                uint32_t codepoint = *src;
+                // Convert the code point to UTF-8 and append it to the output string
+                if (codepoint < 0x80)
+                {
+                    utf8.push_back(static_cast<char>(codepoint));
+                }
+                else if (codepoint < 0x800)
+                {
+                    utf8.push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
+                    utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                }
+                else if (codepoint < 0x10000)
+                {
+                    utf8.push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
+                    utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                    utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                }
+                else if (codepoint <= 0x10FFFF)
+                {
+                    utf8.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
+                    utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+                    utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                    utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                }
             }
-            else if (codepoint < 0x10000)
-            {
-              utf8.push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
-              utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-              utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-            }
-            else if (codepoint <= 0x10FFFF)
-            {
-              utf8.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
-              utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
-              utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-              utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-            }
-          }
         }
-      }
-
-      // Return the output UTF-8 string
-      return utf8;
     }
+
+    // Return the output UTF-8 string
+    return utf8;
+}
 
 // #else
 #endif
