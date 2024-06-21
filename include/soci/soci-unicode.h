@@ -7,15 +7,11 @@
 #include <wchar.h>
 
 // Include necessary headers based on the platform's capabilities for SIMD instructions
-#if defined(SOCI_USE_SSE_4_2) && (defined(_MSC_VER) && defined(_M_X64))
+#if defined(SOCI_USE_SSE_4_2)
 #include <nmmintrin.h> // SSE4.2 intrinsics
-#elif defined(SOCI_USE_AVX2) && (defined(_MSC_VER) && defined(_M_X64))
-#include <immintrin.h> // AVX2 intrinsics
-#elif defined(SOCI_USE_NEON) || (defined(_M_ARM64) && defined(_MSC_VER))
+#elif defined(SOCI_USE_NEON)
 #include <arm_neon.h>
 #endif
-
-// #define SOCI_USE_AVX2
 
 // #undef SOCI_USE_SSE_4_2
 // #undef SOCI_USE_NEON
@@ -1163,52 +1159,43 @@ namespace soci
      * @return std::u16string The output UTF-16 encoded string.
      * @throws soci_error If the input UTF-8 string is not well-formed.
      */
-    inline std::u16string utf8_to_utf16_neon(const std::string &utf8)
-    {
-      std::u16string utf16;
-      utf16.reserve(utf8.size());
+    inline std::u16string utf8_to_utf16_neon(const std::string &utf8) {
+    std::u16string utf16;
+    utf16.reserve(utf8.size());
 
-      const unsigned char *bytes = reinterpret_cast<const unsigned char *>(utf8.data());
-      std::size_t length = utf8.length();
+    const unsigned char *bytes = reinterpret_cast<const unsigned char *>(utf8.data());
+    std::size_t length = utf8.length();
 
-      for (std::size_t i = 0; i < length;)
-      {
-        if (length - i >= 16)
-        {
-          uint8x16_t chunk = vld1q_u8(bytes + i);
-          uint8x16_t mask = vdupq_n_u8(0x80);
-          uint8x16_t result = vceqq_u8(vandq_u8(chunk, mask), vdupq_n_u8(0));
-          uint64_t bitfield_lo = vgetq_lane_u64(vreinterpretq_u64_u8(result), 0);
-          uint64_t bitfield_hi = vgetq_lane_u64(vreinterpretq_u64_u8(result), 1);
-          uint64_t bitfield = bitfield_lo | (bitfield_hi << 8);
+    for (std::size_t i = 0; i < length;) {
+        if (length - i >= 16) {
+            uint8x16_t chunk = vld1q_u8(bytes + i);
+            uint8x16_t mask = vdupq_n_u8(0x80);
+            uint8x16_t result = vceqq_u8(vandq_u8(chunk, mask), vdupq_n_u8(0));
+            uint64_t bitfield_lo = vgetq_lane_u64(vreinterpretq_u64_u8(result), 0);
+            uint64_t bitfield_hi = vgetq_lane_u64(vreinterpretq_u64_u8(result), 1);
+            uint64_t bitfield = bitfield_lo | (bitfield_hi << 8);
 
-          if (bitfield == 0xFFFFFFFFFFFFFFFF)
-          {
-            // All characters in the chunk are ASCII
-            for (int j = 0; j < 16; ++j)
-            {
-              utf16.push_back(static_cast<char16_t>(bytes[i + j]));
+            if (bitfield == 0xFFFFFFFFFFFFFFFF) {
+                // All characters in the chunk are ASCII
+                uint16x8_t chunk_lo = vmovl_u8(vget_low_u8(chunk));
+                uint16x8_t chunk_hi = vmovl_u8(vget_high_u8(chunk));
+                vst1q_u16(reinterpret_cast<uint16_t*>(&utf16[utf16.size()]), chunk_lo);
+                vst1q_u16(reinterpret_cast<uint16_t*>(&utf16[utf16.size() + 8]), chunk_hi);
+                utf16.resize(utf16.size() + 16);
+                i += 16;
+            } else {
+                // Handle non-ASCII characters with NEON
+                utf8_to_utf16_common(bytes + i, length - i, utf16);
+                break;
             }
-            i += 16;
-          }
-          else
-          {
-            // Handle non-ASCII characters with NEON
-            // ... (NEON specific code)
-            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+        } else {
             utf8_to_utf16_common(bytes + i, length - i, utf16);
             break;
-          }
         }
-        else
-        {
-          utf8_to_utf16_common(bytes + i, length - i, utf16);
-          break;
-        }
-      }
-
-      return utf16;
     }
+
+    return utf16;
+}
 
     /**
      * @brief Converts a UTF-16 encoded string to a UTF-8 encoded string using NEON intrinsics.
