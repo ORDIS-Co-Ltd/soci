@@ -13,7 +13,7 @@
 #include <arm_neon.h>
 #endif
 
-#undef SOCI_USE_NEON
+// #undef SOCI_USE_NEON
 
 // Define SOCI_WCHAR_T_IS_WIDE if wchar_t is wider than 16 bits (e.g., on Unix/Linux)
 #if WCHAR_MAX > 0xFFFFu
