@@ -798,6 +798,12 @@ namespace soci
      */
     inline std::string utf32_to_utf8_sse42(const std::u32string &utf32)
     {
+
+      if (!is_valid_utf32(utf32))
+      {
+        throw soci_error("Invalid UTF-32 string");
+      }
+
       std::string utf8;
       utf8.reserve(utf32.size() * 4);
 
@@ -1429,7 +1435,7 @@ namespace soci
       {
         throw soci_error("Invalid UTF-32 string");
       }
-      
+
       std::string utf8;
       utf8.reserve(utf32.size() * 4);
 
