@@ -208,8 +208,8 @@ endfunction()
 
 # Check for SSE 4.2 support
 if (MSVC AND SOCI_TARGET_ARCH_X64)
-    add_definitions(-DSOCI_USE_SSE_4_2)
-    message(STATUS "SSE 4.2 support enabled (MSVC default)")
+    add_definitions(-DSOCI_USE_AVX2)
+    message(STATUS "AVX2 support enabled (MSVC default)")
 else()
     check_and_add_flag("-msse4.2" "-DSOCI_USE_SSE_4_2")
 endif()

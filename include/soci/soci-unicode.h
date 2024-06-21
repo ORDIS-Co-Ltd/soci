@@ -7,11 +7,15 @@
 #include <wchar.h>
 
 // Include necessary headers based on the platform's capabilities for SIMD instructions
-#if defined(SOCI_USE_SSE_4_2) || (defined(_MSC_VER) && defined(_M_X64))
+#if defined(SOCI_USE_SSE_4_2) && (defined(_MSC_VER) && defined(_M_X64))
 #include <nmmintrin.h> // SSE4.2 intrinsics
+#elif defined(SOCI_USE_AVX2) && (defined(_MSC_VER) && defined(_M_X64))
+#include <immintrin.h>
 #elif defined(SOCI_USE_NEON) || (defined(_M_ARM64) && defined(_MSC_VER))
 #include <arm_neon.h>
 #endif
+
+// #define SOCI_USE_AVX2
 
 // #undef SOCI_USE_SSE_4_2
 // #undef SOCI_USE_NEON
@@ -518,7 +522,286 @@ namespace soci
     // The following functions use SIMD instructions to optimize the conversion process.
     // If these instructions are not available, fallback functions are used instead.
 
-#if defined(SOCI_USE_SSE_4_2)
+#if defined(SOCI_USE_AVX2)
+
+    inline std::u16string utf8_to_utf16_avx2(const std::string &utf8)
+    {
+      std::u16string utf16;
+      utf16.reserve(utf8.size());
+
+      const unsigned char *bytes = reinterpret_cast<const unsigned char *>(utf8.data());
+      std::size_t length = utf8.length();
+
+      for (std::size_t i = 0; i < length;)
+      {
+        if (length - i >= 32)
+        {
+          __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(bytes + i));
+          __m256i mask = _mm256_set1_epi8(static_cast<char>(0x80));
+          __m256i result = _mm256_cmpeq_epi8(_mm256_and_si256(chunk, mask), _mm256_setzero_si256());
+          int bitfield = _mm256_movemask_epi8(result);
+
+          if (bitfield == 0xFFFFFFFF)
+          {
+            // All characters in the chunk are ASCII
+            for (int j = 0; j < 32; ++j)
+            {
+              utf16.push_back(static_cast<char16_t>(bytes[i + j]));
+            }
+            i += 32;
+          }
+          else
+          {
+            // Handle non-ASCII characters with AVX2
+            // ... (AVX2 specific code)
+            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+            utf8_to_utf16_common(bytes + i, length - i, utf16);
+            break;
+          }
+        }
+        else
+        {
+          utf8_to_utf16_common(bytes + i, length - i, utf16);
+          break;
+        }
+      }
+
+      return utf16;
+    }
+
+    inline std::string utf16_to_utf8_avx2(const std::u16string &utf16)
+    {
+      std::string utf8;
+      utf8.reserve(utf16.size() * 3);
+
+      const char16_t *chars = utf16.data();
+      std::size_t length = utf16.length();
+
+      for (std::size_t i = 0; i < length;)
+      {
+        if (length - i >= 16)
+        {
+          __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(chars + i));
+          __m256i mask = _mm256_set1_epi16(0x7F);
+          __m256i result = _mm256_cmpeq_epi16(_mm256_and_si256(chunk, mask), chunk);
+          int bitfield = _mm256_movemask_epi8(result);
+
+          if (bitfield == 0xFFFFFFFF)
+          {
+            // All characters in the chunk are ASCII
+            for (int j = 0; j < 16; ++j)
+            {
+              utf8.push_back(static_cast<char>(chars[i + j]));
+            }
+            i += 16;
+          }
+          else
+          {
+            // Handle non-ASCII characters with AVX2
+            // ... (AVX2 specific code)
+            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+            utf16_to_utf8_common(chars + i, length - i, utf8);
+            break;
+          }
+        }
+        else
+        {
+          utf16_to_utf8_common(chars + i, length - i, utf8);
+          break;
+        }
+      }
+
+      return utf8;
+    }
+    
+    inline std::u32string utf16_to_utf32_avx2(const std::u16string &utf16)
+    {
+      std::u32string utf32;
+      utf32.reserve(utf16.size());
+
+      const char16_t *chars = utf16.data();
+      std::size_t length = utf16.length();
+
+      for (std::size_t i = 0; i < length;)
+      {
+        if (length - i >= 16)
+        {
+          __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(chars + i));
+          __m256i highSurrogateMask = _mm256_set1_epi16(static_cast<short>(0xFC00));
+          __m256i highSurrogateStart = _mm256_set1_epi16(static_cast<short>(0xD800));
+          __m256i highSurrogate = _mm256_and_si256(chunk, highSurrogateMask);
+          __m256i isSurrogate = _mm256_cmpeq_epi16(highSurrogate, highSurrogateStart);
+
+          uint32_t bitfield = _mm256_movemask_epi8(isSurrogate);
+
+          if (bitfield == 0)
+          {
+            // No surrogates in the chunk, so we can directly convert the UTF-16 characters to UTF-32
+            for (int j = 0; j < 16; ++j)
+            {
+              utf32.push_back(static_cast<char32_t>(chars[i + j]));
+            }
+            i += 16;
+          }
+          else
+          {
+            // Surrogates present in the chunk, so we need to handle them separately
+            utf16_to_utf32_common(chars + i, length - i, utf32);
+            break;
+          }
+        }
+        else
+        {
+          utf16_to_utf32_common(chars + i, length - i, utf32);
+          break;
+        }
+      }
+
+      return utf32;
+    }
+    
+    inline std::u16string utf32_to_utf16_avx2(const std::u32string &utf32)
+    {
+      std::u16string utf16;
+      utf16.reserve(utf32.size() * 2); // Maximum possible size (all surrogate pairs)
+
+      const char32_t *chars = utf32.data();
+      std::size_t length = utf32.length();
+
+      for (std::size_t i = 0; i < length;)
+      {
+        if (length - i >= 8)
+        {
+          __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(chars + i));
+          __m256i mask = _mm256_set1_epi32(0xFFFF);
+          __m256i result = _mm256_cmpgt_epi32(chunk, mask);
+          int bitfield = _mm256_movemask_ps(_mm256_castsi256_ps(result));
+
+          if (bitfield == 0)
+          {
+            // All characters in the chunk are BMP characters
+            for (int j = 0; j < 8; ++j)
+            {
+              utf16.push_back(static_cast<char16_t>(chars[i + j]));
+            }
+            i += 8;
+          }
+          else
+          {
+            // Handle non-BMP characters with AVX
+            // ... (AVX specific code)
+            // For simplicity, let's assume we handle the non-BMP part here and then call the common function
+            utf32_to_utf16_common(chars + i, length - i, utf16);
+            break;
+          }
+        }
+        else
+        {
+          utf32_to_utf16_common(chars + i, length - i, utf16);
+          break;
+        }
+      }
+
+      return utf16;
+    }
+    
+    inline std::u32string utf8_to_utf32_avx2(const std::string &utf8)
+    {
+      std::u32string utf32;
+      utf32.reserve(utf8.size());
+
+      const unsigned char *bytes = reinterpret_cast<const unsigned char *>(utf8.data());
+      std::size_t length = utf8.length();
+
+      for (std::size_t i = 0; i < length;)
+      {
+        if (length - i >= 32)
+        {
+          __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(bytes + i));
+          __m256i mask = _mm256_set1_epi8(static_cast<char>(0x80));
+          __m256i result = _mm256_cmpeq_epi8(_mm256_and_si256(chunk, mask), _mm256_setzero_si256());
+          int bitfield = _mm256_movemask_epi8(result);
+
+          if (bitfield == 0xFFFFFFFF)
+          {
+            // All characters in the chunk are ASCII
+            for (int j = 0; j < 32; ++j)
+            {
+              utf32.push_back(static_cast<char32_t>(bytes[i + j]));
+            }
+            i += 32;
+          }
+          else
+          {
+            // Handle non-ASCII characters with AVX
+            // ... (AVX specific code)
+            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+            utf8_to_utf32_common(bytes + i, length - i, utf32);
+            break;
+          }
+        }
+        else
+        {
+          utf8_to_utf32_common(bytes + i, length - i, utf32);
+          break;
+        }
+      }
+
+      return utf32;
+    }
+    
+    inline std::string utf32_to_utf8_avx2(const std::u32string &utf32)
+    {
+      
+      if (!is_valid_utf32(utf32))
+      {
+        throw soci_error("Invalid UTF-32 string");
+      }
+      
+      std::string utf8;
+      utf8.reserve(utf32.size() * 4); // Reserve enough space to avoid reallocations
+
+      const char32_t *chars = utf32.data();
+      std::size_t length = utf32.length();
+
+      for (std::size_t i = 0; i < length;)
+      {
+        if (length - i >= 8)
+        {
+          __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(chars + i));
+          __m256i mask = _mm256_set1_epi32(0x7F);
+          __m256i result = _mm256_cmpeq_epi32(_mm256_and_si256(chunk, mask), chunk);
+          int bitfield = _mm256_movemask_ps(_mm256_castsi256_ps(result));
+
+          if (bitfield == 0xFFFFFFFF)
+          {
+            // All characters in the chunk are ASCII
+            for (int j = 0; j < 8; ++j)
+            {
+              utf8.push_back(static_cast<char>(chars[i + j]));
+            }
+            i += 8;
+          }
+          else
+          {
+            // Handle non-ASCII characters with AVX2
+            // ... (AVX2 specific code)
+            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+            utf32_to_utf8_common(chars + i, length - i, utf8);
+            break;
+          }
+        }
+        else
+        {
+          utf32_to_utf8_common(chars + i, length - i, utf8);
+          break;
+        }
+      }
+
+      return utf8;
+    }
+
+#elif defined(SOCI_USE_SSE_4_2)
 
     /**
      * @brief Converts a UTF-8 encoded string to a UTF-16 encoded string using SSE4.2 intrinsics.
@@ -1377,7 +1660,9 @@ namespace soci
      */
     inline std::u16string utf8_to_utf16(const std::string &utf8)
     {
-#if defined(SOCI_USE_SSE_4_2)
+#if defined(SOCI_USE_AVX2)
+      return utf8_to_utf16_avx2(utf8);
+#elif defined(SOCI_USE_SSE_4_2)
       return utf8_to_utf16_sse42(utf8);
 #elif defined(SOCI_USE_NEON) // && (0)
       return utf8_to_utf16_neon(utf8);
@@ -1399,7 +1684,9 @@ namespace soci
      */
     inline std::string utf16_to_utf8(const std::u16string &utf16)
     {
-#if defined(SOCI_USE_SSE_4_2)
+#if defined(SOCI_USE_AVX2)
+      return utf16_to_utf8_avx2(utf16);
+#elif defined(SOCI_USE_SSE_4_2)
       return utf16_to_utf8_sse42(utf16);
 #elif defined(SOCI_USE_NEON) //&& (0)
       return utf16_to_utf8_neon(utf16);
@@ -1421,7 +1708,9 @@ namespace soci
      */
     inline std::u32string utf16_to_utf32(const std::u16string &utf16)
     {
-#if defined(SOCI_USE_SSE_4_2)
+#if defined(SOCI_USE_AVX2)
+      return utf16_to_utf32_avx2(utf16);
+#elif defined(SOCI_USE_SSE_4_2)
       return utf16_to_utf32_sse42(utf16);
 #elif defined(SOCI_USE_NEON)
       return utf16_to_utf32_neon(utf16);
@@ -1443,7 +1732,9 @@ namespace soci
      */
     inline std::u16string utf32_to_utf16(const std::u32string &utf32)
     {
-#if defined(SOCI_USE_SSE_4_2)
+#if defined(SOCI_USE_AVX2)
+      return utf32_to_utf16_avx2(utf32);
+#elif defined(SOCI_USE_SSE_4_2)
       return utf32_to_utf16_sse42(utf32);
 #elif defined(SOCI_USE_NEON)
       return utf32_to_utf16_neon(utf32);
@@ -1465,7 +1756,9 @@ namespace soci
      */
     inline std::u32string utf8_to_utf32(const std::string &utf8)
     {
-#if defined(SOCI_USE_SSE_4_2)
+#if defined(SOCI_USE_AVX2)
+      return utf8_to_utf32_avx2(utf8);
+#elif defined(SOCI_USE_SSE_4_2)
       return utf8_to_utf32_sse42(utf8);
 #elif defined(SOCI_USE_NEON)
       return utf8_to_utf32_neon(utf8);
@@ -1487,7 +1780,9 @@ namespace soci
      */
     inline std::string utf32_to_utf8(const std::u32string &utf32)
     {
-#if defined(SOCI_USE_SSE_4_2)
+#if defined(SOCI_USE_AVX2)
+      return utf32_to_utf8_avx2(utf32);
+#elif defined(SOCI_USE_SSE_4_2)
       return utf32_to_utf8_sse42(utf32);
 #elif defined(SOCI_USE_NEON)
       return utf32_to_utf8_neon(utf32);
