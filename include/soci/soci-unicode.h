@@ -10,7 +10,7 @@
 #if defined(SOCI_USE_SSE_4_2) && (defined(_MSC_VER) && defined(_M_X64))
 #include <nmmintrin.h> // SSE4.2 intrinsics
 #elif defined(SOCI_USE_AVX2) && (defined(_MSC_VER) && defined(_M_X64))
-#include <immintrin.h>
+#include <immintrin.h> // AVX2 intrinsics
 #elif defined(SOCI_USE_NEON) || (defined(_M_ARM64) && defined(_MSC_VER))
 #include <arm_neon.h>
 #endif
