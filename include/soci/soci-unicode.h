@@ -13,7 +13,7 @@
 #include <arm_neon.h>
 #endif
 
-#undef SOCI_USE_NEON
+// #undef SOCI_USE_NEON
 
 // Define SOCI_WCHAR_T_IS_WIDE if wchar_t is wider than 16 bits (e.g., on Unix/Linux)
 #if WCHAR_MAX > 0xFFFFu
@@ -487,8 +487,8 @@ namespace soci
         if (length - i >= 8)
         {
           __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(chars + i));
-          __m128i highSurrogate = _mm_and_si128(chunk, _mm_set1_epi16(0xFC00));
-          __m128i isSurrogate = _mm_cmpeq_epi16(highSurrogate, _mm_set1_epi16(0xD800));
+          __m128i highSurrogate = _mm_and_si128(chunk, _mm_set1_epi16(static_cast<short>(0xFC00)));
+          __m128i isSurrogate = _mm_cmpeq_epi16(highSurrogate, _mm_set1_epi16(static_cast<short>(0xD800)));
           int bitfield = _mm_movemask_epi8(isSurrogate);
 
           if (bitfield == 0)
