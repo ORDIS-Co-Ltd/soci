@@ -1234,27 +1234,40 @@ namespace soci
 
       for (std::size_t i = 0; i < length;)
       {
-        if (length - i >= 8)
+        if (length - i >= 16)
         {
-          uint16x8_t chunk = vld1q_u16(reinterpret_cast<const uint16_t *>(chars + i));
+          uint16x8_t chunk1 = vld1q_u16(reinterpret_cast<const uint16_t *>(chars + i));
+          uint16x8_t chunk2 = vld1q_u16(reinterpret_cast<const uint16_t *>(chars + i + 8));
           uint16x8_t mask = vdupq_n_u16(0x7F);
-          uint16x8_t result = vceqq_u16(vandq_u16(chunk, mask), chunk);
-          uint64_t bitfield = vgetq_lane_u64(vreinterpretq_u64_u16(result), 0);
+          uint16x8_t result1 = vceqq_u16(vandq_u16(chunk1, mask), chunk1);
+          uint16x8_t result2 = vceqq_u16(vandq_u16(chunk2, mask), chunk2);
+          uint64_t bitfield1 = vgetq_lane_u64(vreinterpretq_u64_u16(result1), 0);
+          uint64_t bitfield2 = vgetq_lane_u64(vreinterpretq_u64_u16(result2), 0);
 
-          if (bitfield == 0xFFFFFFFFFFFFFFFF)
+          if (bitfield1 == 0xFFFFFFFFFFFFFFFF && bitfield2 == 0xFFFFFFFFFFFFFFFF)
           {
             // All characters in the chunk are ASCII
-            for (int j = 0; j < 8; ++j)
-            {
-              utf8.push_back(static_cast<char>(chars[i + j]));
-            }
-            i += 8;
+            uint8x8_t chunk1_lo = vmovn_u16(chunk1);
+            uint8x8_t chunk1_hi = vmovn_u16(vshrq_n_u16(chunk1, 8));
+            uint8x8_t chunk2_lo = vmovn_u16(chunk2);
+            uint8x8_t chunk2_hi = vmovn_u16(vshrq_n_u16(chunk2, 8));
+
+            // Widen the 8-bit vectors to 16-bit vectors
+            uint8x16_t chunk1_lo_wide = vcombine_u8(chunk1_lo, chunk1_lo);
+            uint8x16_t chunk1_hi_wide = vcombine_u8(chunk1_hi, chunk1_hi);
+            uint8x16_t chunk2_lo_wide = vcombine_u8(chunk2_lo, chunk2_lo);
+            uint8x16_t chunk2_hi_wide = vcombine_u8(chunk2_hi, chunk2_hi);
+
+            vst1q_u8(reinterpret_cast<uint8_t *>(&utf8[utf8.size()]), chunk1_lo_wide);
+            vst1q_u8(reinterpret_cast<uint8_t *>(&utf8[utf8.size() + 16]), chunk1_hi_wide);
+            vst1q_u8(reinterpret_cast<uint8_t *>(&utf8[utf8.size() + 32]), chunk2_lo_wide);
+            vst1q_u8(reinterpret_cast<uint8_t *>(&utf8[utf8.size() + 48]), chunk2_hi_wide);
+            utf8.resize(utf8.size() + 64);
+            i += 16;
           }
           else
           {
             // Handle non-ASCII characters with NEON
-            // ... (NEON specific code)
-            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
             utf16_to_utf8_common(chars + i, length - i, utf8);
             break;
           }
