@@ -107,7 +107,7 @@ namespace soci
       }
       return true;
     }
-    
+
     /**
      * Check if a given UTF-16 string is valid.
      *
@@ -934,7 +934,7 @@ namespace soci
           // Handle non-ASCII characters with NEON and scalar fallbacks as needed.
           for (size_t i = 0; i < chunk_size; i++)
           {
-            char16_t c = *src++;
+            char16_t c = src[i];
 
             if (c < 0x80)
             {
@@ -948,18 +948,19 @@ namespace soci
             else if ((c >= 0xD800) && (c <= 0xDBFF))
             {
               // Handle UTF-16 surrogate pairs
-              if (src >= end)
-                throw soci_error("Invalid UTF-16 sequence");
+              if (i + 1 >= chunk_size || src + i + 1 >= end)
+                throw soci::soci_error("Invalid UTF-16 sequence");
 
-              char16_t c2 = *src++;
+              char16_t c2 = src[i + 1];
               if ((c2 < 0xDC00) || (c2 > 0xDFFF))
-                throw soci_error("Invalid UTF-16 sequence");
+                throw soci::soci_error("Invalid UTF-16 sequence");
 
               uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
               utf8.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
               utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
               utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
               utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+              i++; // Skip the next character as it is part of the surrogate pair
             }
             else
             {
@@ -968,6 +969,7 @@ namespace soci
               utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
             }
           }
+          src += chunk_size;
         }
       }
 
