@@ -1313,16 +1313,16 @@ namespace soci
           if (bitfield == 0)
           {
             // No surrogates in the chunk, so we can directly convert the UTF-16 characters to UTF-32
-            for (int j = 0; j < 8; ++j)
-            {
-              utf32.push_back(static_cast<char32_t>(chars[i + j]));
-            }
+            uint32x4_t chunk_lo = vmovl_u16(vget_low_u16(chunk));
+            uint32x4_t chunk_hi = vmovl_u16(vget_high_u16(chunk));
+            vst1q_u32(reinterpret_cast<uint32_t *>(&utf32[utf32.size()]), chunk_lo);
+            vst1q_u32(reinterpret_cast<uint32_t *>(&utf32[utf32.size() + 4]), chunk_hi);
+            utf32.resize(utf32.size() + 8);
             i += 8;
           }
           else
           {
             // Surrogates present in the chunk, so we need to handle them separately
-            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
             utf16_to_utf32_common(chars + i, length - i, utf32);
             break;
           }
