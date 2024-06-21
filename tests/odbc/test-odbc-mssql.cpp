@@ -279,6 +279,224 @@ TEST_CASE("MS SQL wchar vector", "[odbc][mssql][vector][wchar]")
 //
 //}
 
+TEST_CASE("UTF-8 validation tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid UTF-8 strings
+    REQUIRE(is_valid_utf8("Hello, world!")); // valid ASCII
+    REQUIRE(is_valid_utf8("")); // Empty string
+    REQUIRE(is_valid_utf8(u8"Здравствуй, мир!")); // valid UTF-8
+    REQUIRE(is_valid_utf8(u8"こんにちは世界")); // valid UTF-8
+    REQUIRE(is_valid_utf8(u8"😀😁😂🤣😃😄😅😆")); // valid UTF-8 with emojis
+
+    // Invalid UTF-8 strings
+    REQUIRE(!is_valid_utf8("\x80")); // Invalid single byte
+    REQUIRE(!is_valid_utf8("\xC3\x28")); // Invalid two-byte character
+    REQUIRE(!is_valid_utf8("\xE2\x82")); // Truncated three-byte character
+    REQUIRE(!is_valid_utf8("\xF0\x90\x28")); // Truncated four-byte character
+    REQUIRE(!is_valid_utf8("\xF0\x90\x8D\x80\x80")); // Extra byte in four-byte character
+}
+
+TEST_CASE("UTF-16 validation tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid UTF-16 strings
+    REQUIRE(is_valid_utf16(u"Hello, world!")); // valid ASCII
+    REQUIRE(is_valid_utf16(u"Здравствуй, мир!")); // valid Cyrillic
+    REQUIRE(is_valid_utf16(u"こんにちは世界")); // valid Japanese
+    REQUIRE(is_valid_utf16(u"😀😁😂🤣😃😄😅😆")); // valid emojis
+
+    // Invalid UTF-16 strings
+    std::u16string invalid_utf16 = u"";
+    invalid_utf16 += 0xD800; // lone high surrogate
+    REQUIRE(!is_valid_utf16(invalid_utf16)); // Invalid UTF-16
+
+    std::u16string valid_utf16 = u"";
+    valid_utf16 += 0xD800;
+    valid_utf16 += 0xDC00; // valid surrogate pair
+    REQUIRE(is_valid_utf16(valid_utf16));
+
+    invalid_utf16 = u"";
+    invalid_utf16 += 0xDC00; // lone low surrogate
+    REQUIRE(!is_valid_utf16(invalid_utf16)); // Invalid UTF-16
+
+    invalid_utf16 = u"";
+    invalid_utf16 += 0xD800;
+    invalid_utf16 += 0xD800; // two high surrogates in a row
+    REQUIRE(!is_valid_utf16(invalid_utf16)); // Invalid UTF-16
+
+    invalid_utf16 = u"";
+    invalid_utf16 += 0xDC00;
+    invalid_utf16 += 0xDC00; // two low surrogates in a row
+    REQUIRE(!is_valid_utf16(invalid_utf16)); // Invalid UTF-16
+}
+
+TEST_CASE("UTF-32 validation tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid UTF-32 strings
+    REQUIRE(is_valid_utf32(U"Hello, world!")); // valid ASCII
+    REQUIRE(is_valid_utf32(U"Здравствуй, мир!")); // valid Cyrillic
+    REQUIRE(is_valid_utf32(U"こんにちは世界")); // valid Japanese
+    REQUIRE(is_valid_utf32(U"😀😁😂🤣😃😄😅😆")); // valid emojis
+
+    // Invalid UTF-32 strings
+    REQUIRE(!is_valid_utf32(U"\x110000")); // Invalid UTF-32 code point
+    REQUIRE(!is_valid_utf32(U"\x1FFFFF")); // Invalid range
+    REQUIRE(!is_valid_utf32(U"\xFFFFFFFF")); // Invalid range
+}
+
+TEST_CASE("UTF-16 to UTF-32 conversion tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid conversion tests
+    REQUIRE(utf16_to_utf32(u"Hello, world!") == U"Hello, world!");
+    REQUIRE(utf16_to_utf32(u"こんにちは世界") == U"こんにちは世界");
+    REQUIRE(utf16_to_utf32(u"😀😁😂🤣😃😄😅😆") == U"😀😁😂🤣😃😄😅😆");
+
+    // Edge cases
+    std::u16string utf16;
+    utf16.push_back(0xD83D); // high surrogate
+    utf16.push_back(0xDE00); // low surrogate
+    REQUIRE(utf16_to_utf32(utf16) == U"😀");
+
+    // Invalid conversion (should throw an exception)
+    std::u16string invalid_utf16;
+    invalid_utf16.push_back(0xD800); // lone high surrogate
+    REQUIRE_THROWS_AS(utf16_to_utf32(invalid_utf16), soci::soci_error);
+}
+
+TEST_CASE("UTF-32 to UTF-16 conversion tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid conversion tests
+    REQUIRE(utf32_to_utf16(U"Hello, world!") == u"Hello, world!");
+    REQUIRE(utf32_to_utf16(U"こんにちは世界") == u"こんにちは世界");
+    REQUIRE(utf32_to_utf16(U"😀😁😂🤣😃😄😅😆") == u"😀😁😂🤣😃😄😅😆");
+
+    // Edge cases
+    std::u32string utf32 = U"\U0001F600"; // 😀
+    std::u16string expected_utf16;
+    expected_utf16.push_back(0xD83D); // high surrogate
+    expected_utf16.push_back(0xDE00); // low surrogate
+    REQUIRE(utf32_to_utf16(utf32) == expected_utf16);
+
+    // Invalid conversion (should throw an exception)
+    std::u32string invalid_utf32 = U"\x110000"; // Invalid code point
+    REQUIRE_THROWS_AS(utf32_to_utf16(invalid_utf32), soci::soci_error);
+}
+
+TEST_CASE("UTF-8 to UTF-16 conversion tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid conversion tests
+    REQUIRE(utf8_to_utf16(u8"Hello, world!") == u"Hello, world!");
+    REQUIRE(utf8_to_utf16(u8"こんにちは世界") == u"こんにちは世界");
+    REQUIRE(utf8_to_utf16(u8"😀😁😂🤣😃😄😅😆") == u"😀😁😂🤣😃😄😅😆");
+
+    // Edge cases
+    std::string utf8 = u8"\xF0\x9F\x98\x80"; // 😀
+    std::u16string expected_utf16;
+    expected_utf16.push_back(0xD83D); // high surrogate
+    expected_utf16.push_back(0xDE00); // low surrogate
+    REQUIRE(utf8_to_utf16(utf8) == expected_utf16);
+
+    // Invalid conversion (should throw an exception)
+    std::string invalid_utf8 = "\xF0\x28\x8C\xBC"; // Invalid UTF-8 sequence
+    REQUIRE_THROWS_AS(utf8_to_utf16(invalid_utf8), soci::soci_error);
+}
+
+TEST_CASE("UTF-16 to UTF-8 conversion tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid conversion tests
+    REQUIRE(utf16_to_utf8(u"Hello, world!") == u8"Hello, world!");
+    REQUIRE(utf16_to_utf8(u"こんにちは世界") == u8"こんにちは世界");
+    REQUIRE(utf16_to_utf8(u"😀😁😂🤣😃😄😅😆") == u8"😀😁😂🤣😃😄😅😆");
+
+    // Edge cases
+    std::u16string utf16;
+    utf16.push_back(0xD83D); // high surrogate
+    utf16.push_back(0xDE00); // low surrogate
+    REQUIRE(utf16_to_utf8(utf16) == u8"\xF0\x9F\x98\x80"); // 😀
+
+    // Invalid conversion (should throw an exception)
+    std::u16string invalid_utf16;
+    invalid_utf16.push_back(0xD800); // lone high surrogate
+    REQUIRE_THROWS_AS(utf16_to_utf8(invalid_utf16), soci::soci_error);
+}
+
+TEST_CASE("UTF-8 to UTF-32 conversion tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid conversion tests
+    REQUIRE(utf8_to_utf32(u8"Hello, world!") == U"Hello, world!");
+    REQUIRE(utf8_to_utf32(u8"こんにちは世界") == U"こんにちは世界");
+    REQUIRE(utf8_to_utf32(u8"😀😁😂🤣😃😄😅😆") == U"😀😁😂🤣😃😄😅😆");
+
+    // Edge cases
+    std::string utf8 = u8"\xF0\x9F\x98\x80"; // 😀
+    REQUIRE(utf8_to_utf32(utf8) == U"\U0001F600");
+
+    // Invalid conversion (should throw an exception)
+    std::string invalid_utf8 = "\xF0\x28\x8C\xBC"; // Invalid UTF-8 sequence
+    REQUIRE_THROWS_AS(utf8_to_utf32(invalid_utf8), soci::soci_error);
+}
+
+TEST_CASE("UTF-32 to UTF-8 conversion tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid conversion tests
+    REQUIRE(utf32_to_utf8(U"Hello, world!") == u8"Hello, world!");
+    REQUIRE(utf32_to_utf8(U"こんにちは世界") == u8"こんにちは世界");
+    REQUIRE(utf32_to_utf8(U"😀😁😂🤣😃😄😅😆") == u8"😀😁😂🤣😃😄😅😆");
+
+    // Edge cases
+    std::u32string utf32 = U"\U0001F600"; // 😀
+    REQUIRE(utf32_to_utf8(utf32) == u8"\xF0\x9F\x98\x80");
+
+    // Invalid conversion (should throw an exception)
+    std::u32string invalid_utf32 = U"\x110000"; // Invalid code point
+    REQUIRE_THROWS_AS(utf32_to_utf8(invalid_utf32), soci::soci_error);
+}
+
+TEST_CASE("UTF-8 to wide string conversion tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid conversion tests
+    REQUIRE(utf8_to_wide(u8"Hello, world!") == L"Hello, world!");
+    REQUIRE(utf8_to_wide(u8"こんにちは世界") == L"こんにちは世界");
+    REQUIRE(utf8_to_wide(u8"😀😁😂🤣😃😄😅😆") == L"😀😁😂🤣😃😄😅😆");
+
+    // Edge cases
+    std::string utf8 = u8"\xF0\x9F\x98\x80"; // 😀
+    std::wstring expected_wide = L"\U0001F600";
+    REQUIRE(utf8_to_wide(utf8) == expected_wide);
+
+    // Invalid conversion (should throw an exception)
+    std::string invalid_utf8 = "\xF0\x28\x8C\xBC"; // Invalid UTF-8 sequence
+    REQUIRE_THROWS_AS(utf8_to_wide(invalid_utf8), soci::soci_error);
+}
+
+TEST_CASE("Wide string to UTF-8 conversion tests", "[unicode]") {
+    using namespace soci::details;
+
+    // Valid conversion tests
+    REQUIRE(wide_to_utf8(L"Hello, world!") == u8"Hello, world!");
+    REQUIRE(wide_to_utf8(L"こんにちは世界") == u8"こんにちは世界");
+    REQUIRE(wide_to_utf8(L"😀😁😂🤣😃😄😅😆") == u8"😀😁😂🤣😃😄😅😆");
+
+    // Edge cases
+    std::wstring wide = L"\U0001F600"; // 😀
+    REQUIRE(wide_to_utf8(wide) == u8"\xF0\x9F\x98\x80");
+
+    // Invalid conversion (should throw an exception)
+    std::wstring invalid_wide;
+    invalid_wide.push_back(0xD800); // lone high surrogate
+    REQUIRE_THROWS_AS(wide_to_utf8(invalid_wide), soci::soci_error);
+}
+
+
 // DDL Creation objects for common tests
 struct table_creator_one : public table_creator_base
 {
