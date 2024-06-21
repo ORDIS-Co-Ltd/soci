@@ -629,6 +629,12 @@ namespace soci
         {
           uint32_t codepoint = *src;
 
+          // Validate the code point
+          if (codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+          {
+            throw soci::soci_error("Invalid UTF-32 code point");
+          }
+
           if (codepoint < 0x80)
           {
             // 1-byte sequence (ASCII)
@@ -654,11 +660,6 @@ namespace soci
             utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
             utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
             utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-          }
-          else
-          {
-            // Invalid code point
-            throw soci_error("Invalid UTF-32 code point");
           }
         }
       }
