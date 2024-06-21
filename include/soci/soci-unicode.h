@@ -13,7 +13,7 @@
 #include <arm_neon.h>
 #endif
 
-// #undef SOCI_USE_NEON
+#undef SOCI_USE_NEON
 
 // Define SOCI_WCHAR_T_IS_WIDE if wchar_t is wider than 16 bits (e.g., on Unix/Linux)
 #if WCHAR_MAX > 0xFFFFu
@@ -234,6 +234,19 @@ namespace soci
       }
     }
 
+    /**
+     * @brief Convert a UTF-16 encoded string to UTF-8.
+     *
+     * This function takes a UTF-16 encoded string and its length, and appends the UTF-8
+     * representation of the string to the provided std::string. It handles UTF-16 surrogate
+     * pairs correctly.
+     *
+     * @param chars The UTF-16 encoded string to convert.
+     * @param length The length of the UTF-16 encoded string.
+     * @param utf8 The std::string to which the UTF-8 representation of the input string
+     *             will be appended.
+     * @throw soci_error If the input UTF-16 string is not valid.
+     */
     inline void utf16_to_utf8_common(const char16_t *chars, std::size_t length, std::string &utf8)
     {
       for (std::size_t i = 0; i < length; ++i)
@@ -279,6 +292,51 @@ namespace soci
           utf8.push_back(static_cast<char>(0xE0 | ((c >> 12) & 0x0F)));
           utf8.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
           utf8.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+      }
+    }
+
+    /**
+     * @brief Converts a UTF-16 string to a UTF-32 string.
+     *
+     * This function iterates over the input UTF-16 string and converts each character to UTF-32.
+     * It handles surrogate pairs correctly. If the input string contains invalid UTF-16 sequences,
+     * such as a lone low surrogate or a truncated surrogate pair, the function throws a soci_error exception.
+     *
+     * @param chars Pointer to the first character of the input UTF-16 string.
+     * @param length Length of the input UTF-16 string.
+     * @param utf32 Reference to the output UTF-32 string.
+     * @throw soci_error If the input string contains invalid UTF-16 sequences.
+     */
+    inline void utf16_to_utf32_common(const char16_t *chars, std::size_t length, std::u32string &utf32)
+    {
+      for (std::size_t i = 0; i < length; ++i)
+      {
+        char16_t c = chars[i];
+
+        if (c >= 0xD800 && c <= 0xDBFF)
+        {
+          // High surrogate, must be followed by a low surrogate
+          if (i + 1 >= length)
+            throw soci_error("Invalid UTF-16 sequence (truncated surrogate pair)");
+
+          char16_t c2 = chars[i + 1];
+          if (c2 < 0xDC00 || c2 > 0xDFFF)
+            throw soci_error("Invalid UTF-16 sequence (invalid surrogate pair)");
+
+          uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
+          utf32.push_back(codepoint);
+          ++i; // Skip the next character as it is part of the surrogate pair
+        }
+        else if (c >= 0xDC00 && c <= 0xDFFF)
+        {
+          // Low surrogate without preceding high surrogate
+          throw soci_error("Invalid UTF-16 sequence (lone low surrogate)");
+        }
+        else
+        {
+          // Valid BMP character
+          utf32.push_back(static_cast<char32_t>(c));
         }
       }
     }
@@ -421,63 +479,39 @@ namespace soci
       std::u32string utf32;
       utf32.reserve(utf16.size());
 
-      const char16_t *src = utf16.data();
-      const char16_t *end = src + utf16.size();
+      const char16_t *chars = utf16.data();
+      std::size_t length = utf16.length();
 
-      // Constants for surrogate detection
-      const __m128i highSurrogateMask = _mm_set1_epi16(static_cast<int16_t>(0xFC00));
-      const __m128i highSurrogateStart = _mm_set1_epi16(static_cast<int16_t>(0xD800));
-
-      while (src < end)
+      for (std::size_t i = 0; i < length;)
       {
-        size_t remaining = end - src;
-
-        if (remaining >= 8)
+        if (length - i >= 8)
         {
-          // Load a chunk of 8 UTF-16 characters
-          __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(src));
-          __m128i highSurrogate = _mm_and_si128(chunk, highSurrogateMask);
-          __m128i isHighSurrogate = _mm_cmpeq_epi16(highSurrogate, highSurrogateStart);
-
-          uint32_t bitfield = _mm_movemask_epi8(isHighSurrogate);
+          __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(chars + i));
+          __m128i highSurrogate = _mm_and_si128(chunk, _mm_set1_epi16(0xFC00));
+          __m128i isSurrogate = _mm_cmpeq_epi16(highSurrogate, _mm_set1_epi16(0xD800));
+          int bitfield = _mm_movemask_epi8(isSurrogate);
 
           if (bitfield == 0)
           {
-            // No surrogates in the chunk, convert directly
-            for (int i = 0; i < 8; ++i)
+            // No surrogates in the chunk, so we can directly convert the UTF-16 characters to UTF-32
+            for (int j = 0; j < 8; ++j)
             {
-              utf32.push_back(static_cast<char32_t>(src[i]));
+              utf32.push_back(static_cast<char32_t>(chars[i + j]));
             }
-            src += 8;
-            continue;
+            i += 8;
+          }
+          else
+          {
+            // Surrogates present in the chunk, so we need to handle them separately
+            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+            utf16_to_utf32_common(chars + i, length - i, utf32);
+            break;
           }
         }
-
-        // Process remaining characters or handle surrogates
-        while (src < end)
+        else
         {
-          char16_t c = *src++;
-
-          if (c >= 0xD800 && c <= 0xDBFF) // High surrogate
-          {
-            if (src >= end)
-              throw soci_error("Invalid UTF-16 sequence (truncated surrogate pair)");
-
-            char16_t c2 = *src++;
-            if (c2 < 0xDC00 || c2 > 0xDFFF)
-              throw soci_error("Invalid UTF-16 sequence (invalid surrogate pair)");
-
-            uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
-            utf32.push_back(codepoint);
-          }
-          else if (c >= 0xDC00 && c <= 0xDFFF) // Low surrogate without preceding high surrogate
-          {
-            throw soci_error("Invalid UTF-16 sequence (lone low surrogate)");
-          }
-          else // Basic Multilingual Plane (BMP)
-          {
-            utf32.push_back(static_cast<char32_t>(c));
-          }
+          utf16_to_utf32_common(chars + i, length - i, utf32);
+          break;
         }
       }
 
@@ -921,66 +955,42 @@ namespace soci
      */
     inline std::u32string utf16_to_utf32_neon(const std::u16string &utf16)
     {
-      // Check if the input UTF-16 string is valid
-      if (!is_valid_utf16(utf16))
-      {
-        throw soci_error("Invalid UTF-16 string");
-      }
-
       std::u32string utf32;
       utf32.reserve(utf16.size());
 
-      const char16_t *src = utf16.data();
-      const char16_t *end = src + utf16.size();
+      const char16_t *chars = utf16.data();
+      std::size_t length = utf16.length();
 
-      while (src < end)
+      for (std::size_t i = 0; i < length;)
       {
-        // Load 8 UTF-16 characters into a NEON register
-        uint16x8_t chunk = vld1q_u16(reinterpret_cast<const uint16_t *>(src));
-
-        // Check for high surrogates (values between 0xD800 and 0xDBFF)
-        uint16x8_t highSurrogate = vandq_u16(chunk, vdupq_n_u16(0xFC00));
-        uint16x8_t isSurrogate = vceqq_u16(highSurrogate, vdupq_n_u16(0xD800));
-
-        // Convert the NEON register to a 64-bit integer for easier bitwise operations
-        uint64_t bitfield = vgetq_lane_u64(vreinterpretq_u64_u16(isSurrogate), 0);
-
-        if (bitfield == 0)
+        if (length - i >= 8)
         {
-          // No surrogates in the chunk, so we can directly convert the UTF-16 characters to UTF-32
-          for (int i = 0; i < 8 && src < end; ++i)
+          uint16x8_t chunk = vld1q_u16(reinterpret_cast<const uint16_t *>(chars + i));
+          uint16x8_t highSurrogate = vandq_u16(chunk, vdupq_n_u16(0xFC00));
+          uint16x8_t isSurrogate = vceqq_u16(highSurrogate, vdupq_n_u16(0xD800));
+          uint64_t bitfield = vgetq_lane_u64(vreinterpretq_u64_u16(isSurrogate), 0);
+
+          if (bitfield == 0)
           {
-            utf32.push_back(static_cast<char32_t>(*src));
-            src++;
+            // No surrogates in the chunk, so we can directly convert the UTF-16 characters to UTF-32
+            for (int j = 0; j < 8; ++j)
+            {
+              utf32.push_back(static_cast<char32_t>(chars[i + j]));
+            }
+            i += 8;
+          }
+          else
+          {
+            // Surrogates present in the chunk, so we need to handle them separately
+            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
+            utf16_to_utf32_common(chars + i, length - i, utf32);
+            break;
           }
         }
         else
         {
-          // Surrogates present in the chunk, so we need to handle them separately
-          while (src < end)
-          {
-            char16_t c = *src++;
-
-            if ((c >= 0xD800) && (c <= 0xDBFF))
-            {
-              // This is a high surrogate, so we need to combine it with a low surrogate to form a UTF-32 character
-              if (src >= end)
-                throw soci_error("Invalid UTF-16 sequence");
-
-              char16_t c2 = *src++;
-              if ((c2 < 0xDC00) || (c2 > 0xDFFF))
-                throw soci_error("Invalid UTF-16 sequence");
-
-              // Combine the high and low surrogates to form a UTF-32 character
-              uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
-              utf32.push_back(codepoint);
-            }
-            else
-            {
-              // This is not a surrogate, so we can directly convert it to UTF-32
-              utf32.push_back(static_cast<char32_t>(c));
-            }
-          }
+          utf16_to_utf32_common(chars + i, length - i, utf32);
+          break;
         }
       }
 
@@ -1328,43 +1338,13 @@ namespace soci
      */
     inline std::u32string utf16_to_utf32_fallback(const std::u16string &utf16)
     {
-      // Validate UTF-16 string if necessary
-      if (!is_valid_utf16(utf16))
-      {
-        throw soci_error("Invalid UTF-16 string");
-      }
-
       std::u32string utf32;
       utf32.reserve(utf16.size());
 
-      for (std::size_t i = 0; i < utf16.size();)
-      {
-        char16_t c = utf16[i++];
+      const char16_t *chars = utf16.data();
+      std::size_t length = utf16.length();
 
-        if (c >= 0xD800 && c <= 0xDBFF)
-        {
-          // High surrogate, must be followed by a low surrogate
-          if (i >= utf16.size())
-            throw soci_error("Invalid UTF-16 sequence (truncated surrogate pair)");
-
-          char16_t c2 = utf16[i++];
-          if (c2 < 0xDC00 || c2 > 0xDFFF)
-            throw soci_error("Invalid UTF-16 sequence (invalid surrogate pair)");
-
-          uint32_t codepoint = (((c & 0x3FF) << 10) | (c2 & 0x3FF)) + 0x10000;
-          utf32.push_back(codepoint);
-        }
-        else if (c >= 0xDC00 && c <= 0xDFFF)
-        {
-          // Low surrogate without preceding high surrogate
-          throw soci_error("Invalid UTF-16 sequence (lone low surrogate)");
-        }
-        else
-        {
-          // Valid BMP character
-          utf32.push_back(static_cast<char32_t>(c));
-        }
-      }
+      utf16_to_utf32_common(chars, length, utf32);
 
       return utf32;
     }
