@@ -13,6 +13,8 @@
 #include <arm_neon.h>
 #endif
 
+// #undef SOCI_USE_NEON
+
 // Define SOCI_WCHAR_T_IS_WIDE if wchar_t is wider than 16 bits (e.g., on Unix/Linux)
 #if WCHAR_MAX > 0xFFFFu
 #define SOCI_WCHAR_T_IS_WIDE
@@ -23,90 +25,6 @@ namespace soci
   namespace details
   {
 
-#if defined(SOCI_USE_SSE_4_2)
-
-    /**
-     * @brief Checks if a given sequence of bytes is a valid UTF-8 sequence.
-     *
-     * This function uses SSE4.2 instructions to perform the check, which can be
-     * significantly faster than a scalar implementation, especially for long sequences.
-     *
-     * @param bytes A pointer to the first byte of the sequence to check.
-     * @param length The number of bytes in the sequence.
-     * @return True if the sequence is a valid UTF-8 sequence, false otherwise.
-     */
-    inline bool is_valid_utf8_sequence_sse42(const unsigned char *bytes, int length)
-    {
-      __m128i mask1, mask2, mask3, mask4;
-      __m128i input = _mm_loadu_si128(reinterpret_cast<const __m128i *>(bytes));
-      switch (length)
-      {
-      case 1:
-        mask1 = _mm_set1_epi8(static_cast<char>(0x80));
-        return _mm_testz_si128(input, mask1);
-      case 2:
-        mask1 = _mm_set1_epi8(static_cast<char>(0xE0));
-        mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
-        return _mm_testc_si128(input, mask1) && _mm_testc_si128(_mm_srli_si128(input, 1), mask2);
-      case 3:
-        mask1 = _mm_set1_epi8(static_cast<char>(0xF0));
-        mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
-        mask3 = _mm_set1_epi8(static_cast<char>(0x80));
-        return _mm_testc_si128(input, mask1) && _mm_testc_si128(_mm_srli_si128(input, 1), mask2) && _mm_testc_si128(_mm_srli_si128(input, 2), mask3);
-      case 4:
-        mask1 = _mm_set1_epi8(static_cast<char>(0xF8));
-        mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
-        mask3 = _mm_set1_epi8(static_cast<char>(0x80));
-        mask4 = _mm_set1_epi8(static_cast<char>(0x80));
-        return _mm_testc_si128(input, mask1) && _mm_testc_si128(_mm_srli_si128(input, 1), mask2) && _mm_testc_si128(_mm_srli_si128(input, 2), mask3) && _mm_testc_si128(_mm_srli_si128(input, 3), mask4);
-      default:
-        return false;
-      }
-    }
-
-#elif defined(SOCI_USE_NEON)
-
-    /**
-     * @brief Checks if a given sequence of bytes is a valid UTF-8 sequence.
-     *
-     * This function uses NEON intrinsics to perform the validation in a vectorized manner.
-     *
-     * @param bytes Pointer to the sequence of bytes to be checked.
-     * @param length Length of the sequence.
-     * @return True if the sequence is a valid UTF-8 sequence, false otherwise.
-     */
-    inline bool is_valid_utf8_sequence_neon(const unsigned char *bytes, int length)
-    {
-      uint8x16_t mask1, mask2, mask3, mask4;
-      uint8x16_t input = vld1q_u8(bytes);
-
-      switch (length)
-      {
-      case 1:
-        mask1 = vdupq_n_u8(0x80);
-        return vgetq_lane_u64(vreinterpretq_u64_u8(vceqq_u8(vandq_u8(input, mask1), vdupq_n_u8(0))), 0) == 0xFFFFFFFFFFFFFFFF;
-      case 2:
-        mask1 = vdupq_n_u8(0xE0);
-        mask2 = vdupq_n_u8(0xC0);
-        return vgetq_lane_u64(vreinterpretq_u64_u8(vandq_u8(vceqq_u8(vandq_u8(input, mask1), vdupq_n_u8(0xC0)), vceqq_u8(vandq_u8(vextq_u8(input, input, 1), mask2), vdupq_n_u8(0x80)))), 0) == 0xFFFFFFFFFFFFFFFF;
-      case 3:
-        mask1 = vdupq_n_u8(0xF0);
-        mask2 = vdupq_n_u8(0xC0);
-        mask3 = vdupq_n_u8(0x80);
-        return vgetq_lane_u64(vreinterpretq_u64_u8(vandq_u8(vandq_u8(vceqq_u8(vandq_u8(input, mask1), vdupq_n_u8(0xE0)), vceqq_u8(vandq_u8(vextq_u8(input, input, 1), mask2), vdupq_n_u8(0x80))), vceqq_u8(vandq_u8(vextq_u8(input, input, 2), mask3), vdupq_n_u8(0x80)))), 0) == 0xFFFFFFFFFFFFFFFF;
-      case 4:
-        mask1 = vdupq_n_u8(0xF8);
-        mask2 = vdupq_n_u8(0xC0);
-        mask3 = vdupq_n_u8(0x80);
-        mask4 = vdupq_n_u8(0x80);
-        return vgetq_lane_u64(vreinterpretq_u64_u8(vandq_u8(vandq_u8(vandq_u8(vceqq_u8(vandq_u8(input, mask1), vdupq_n_u8(0xF0)), vceqq_u8(vandq_u8(vextq_u8(input, input, 1), mask2), vdupq_n_u8(0x80))), vceqq_u8(vandq_u8(vextq_u8(input, input, 2), mask3), vdupq_n_u8(0x80))), vceqq_u8(vandq_u8(vextq_u8(input, input, 3), mask4), vdupq_n_u8(0x80)))), 0) == 0xFFFFFFFFFFFFFFFF;
-      default:
-        return false;
-      }
-    }
-
-#else
-
     /**
      * Helper function to check if a UTF-8 sequence is valid.
      *
@@ -116,7 +34,7 @@ namespace soci
      * @param length Length of the byte sequence.
      * @return True if the sequence is a valid UTF-8 encoded character, false otherwise.
      */
-    inline bool is_valid_utf8_sequence_fallback(const unsigned char *bytes, int length)
+    inline bool is_valid_utf8_sequence(const unsigned char *bytes, int length)
     {
       if (length == 1)
       {
@@ -135,32 +53,6 @@ namespace soci
         return (bytes[0] & 0xF8) == 0xF0 && (bytes[1] & 0xC0) == 0x80 && (bytes[2] & 0xC0) == 0x80 && (bytes[3] & 0xC0) == 0x80;
       }
       return false;
-    }
-
-#endif
-
-    /**
-     * Checks if a given sequence of bytes is a valid UTF-8 encoded string.
-     *
-     * This function uses different implementations based on the available
-     * hardware instructions. If SSE4.2 instructions are available, it uses
-     * the is_valid_utf8_sequence_sse42 function. If NEON instructions are
-     * available, it uses the is_valid_utf8_sequence_neon function. If neither
-     * is available, it uses the is_valid_utf8_sequence_fallback function.
-     *
-     * @param bytes A pointer to the first byte of the sequence to check.
-     * @param length The number of bytes in the sequence.
-     * @return True if the sequence is a valid UTF-8 encoded string, false otherwise.
-     */
-    inline bool is_valid_utf8_sequence(const unsigned char *bytes, int length)
-    {
-#if defined(SOCI_USE_SSE_4_2)
-      return is_valid_utf8_sequence_sse42(bytes, length);
-#elif defined(SOCI_USE_NEON)
-      return is_valid_utf8_sequence_neon(bytes, length);
-#else
-      return is_valid_utf8_sequence_fallback(bytes, length);
-#endif
     }
 
     // Check if a UTF-8 string is valid
@@ -215,9 +107,7 @@ namespace soci
       }
       return true;
     }
-
-    // soci-unicode.h (111-135)
-
+    
     /**
      * Check if a given UTF-16 string is valid.
      *
