@@ -500,7 +500,38 @@ TEST_CASE("Wide string to UTF-8 conversion tests", "[unicode]") {
     REQUIRE_THROWS_AS(wide_to_utf8(invalid_wide), soci::soci_error);
 }
 
-TEST_CASE("UTF Conversion Speed Test", "[unicode]")
+TEST_CASE("UTF Conversion Speed Test (Scalar) (ASCII)", "[unicode]")
+{
+    std::string utf8(1000000, 'A'); // 1,000,000 ASCII characters
+    auto start = std::chrono::high_resolution_clock::now();
+    for(int i = 0; i < 100; ++i)
+    {
+        std::u16string result1 = details::utf8_to_utf16_fallback(utf8); // Non-intrinsic
+        
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "Scalar ASCII Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
+}
+
+TEST_CASE("UTF Conversion Speed Test (scalar) (non-ASCII)", "[unicode]")
+{
+    std::string utf8;
+    for(size_t i = 0UL; i < 1000000UL; ++i)
+    {
+      utf8.append("世");
+    }
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    for(int i = 0; i < 100; ++i)
+    {
+        std::u16string result1 = details::utf8_to_utf16_fallback(utf8); // Non-intrinsic
+        
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "Scalar Non-ASCII Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
+}
+
+TEST_CASE("UTF Conversion Speed Test (optimized) (ASCII)", "[unicode]")
 {
     std::string utf8(1000000, 'A'); // 1,000,000 ASCII characters
     auto start = std::chrono::high_resolution_clock::now();
@@ -510,7 +541,25 @@ TEST_CASE("UTF Conversion Speed Test", "[unicode]")
         
     }
     auto end = std::chrono::high_resolution_clock::now();
-    std::cout << "Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
+    std::cout << "Optimized ASCII Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
+}
+
+TEST_CASE("UTF Conversion Speed Test (non-ASCII)", "[unicode]")
+{
+    std::string utf8;
+    for(size_t i = 0UL; i < 1000000UL; ++i)
+    {
+      utf8.append("世");
+    }
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    for(int i = 0; i < 100; ++i)
+    {
+        std::u16string result1 = details::utf8_to_utf16(utf8); // Non-intrinsic
+        
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "Optimized Non-ASCII Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
 }
 
 
