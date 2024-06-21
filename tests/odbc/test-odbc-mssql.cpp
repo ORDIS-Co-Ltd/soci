@@ -500,7 +500,7 @@ TEST_CASE("Wide string to UTF-8 conversion tests", "[unicode]") {
     REQUIRE_THROWS_AS(wide_to_utf8(invalid_wide), soci::soci_error);
 }
 
-TEST_CASE("UTF Conversion Speed Test (Scalar) (ASCII)", "[unicode]")
+TEST_CASE("UTF8->UTF16 Conversion Speed Test (Scalar) (ASCII)", "[unicode]")
 {
     std::string utf8(1000000, 'A'); // 1,000,000 ASCII characters
     auto start = std::chrono::high_resolution_clock::now();
@@ -513,7 +513,7 @@ TEST_CASE("UTF Conversion Speed Test (Scalar) (ASCII)", "[unicode]")
     std::cout << "Scalar ASCII Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
 }
 
-TEST_CASE("UTF Conversion Speed Test (scalar) (non-ASCII)", "[unicode]")
+TEST_CASE("UTF8->UTF16 Conversion Speed Test (scalar) (non-ASCII)", "[unicode]")
 {
     std::string utf8;
     for(size_t i = 0UL; i < 1000000UL; ++i)
@@ -531,7 +531,7 @@ TEST_CASE("UTF Conversion Speed Test (scalar) (non-ASCII)", "[unicode]")
     std::cout << "Scalar Non-ASCII Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
 }
 
-TEST_CASE("UTF Conversion Speed Test (optimized) (ASCII)", "[unicode]")
+TEST_CASE("UTF8->UTF16 Conversion Speed Test (optimized) (ASCII)", "[unicode]")
 {
     std::string utf8(1000000, 'A'); // 1,000,000 ASCII characters
     auto start = std::chrono::high_resolution_clock::now();
@@ -544,7 +544,7 @@ TEST_CASE("UTF Conversion Speed Test (optimized) (ASCII)", "[unicode]")
     std::cout << "Optimized ASCII Duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
 }
 
-TEST_CASE("UTF Conversion Speed Test (non-ASCII)", "[unicode]")
+TEST_CASE("UTF8->UTF16 Conversion Speed Test (non-ASCII)", "[unicode]")
 {
     std::string utf8;
     for(size_t i = 0UL; i < 1000000UL; ++i)
