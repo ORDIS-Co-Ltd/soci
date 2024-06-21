@@ -252,7 +252,7 @@ namespace soci
         if (length - i >= 16)
         {
           __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(bytes + i));
-          __m128i mask = _mm_set1_epi8(0x80);
+          __m128i mask = _mm_set1_epi8(static_cast<char>(0x80));
           __m128i result = _mm_cmpeq_epi8(_mm_and_si128(chunk, mask), _mm_setzero_si128());
           int bitfield = _mm_movemask_epi8(result);
 
