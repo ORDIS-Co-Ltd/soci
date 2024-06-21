@@ -356,9 +356,9 @@ TEST_CASE("UTF-16 to UTF-32 conversion tests", "[unicode]") {
 
     // Edge cases
     std::u16string utf16;
-    utf16.push_back(0xD83D); // high surrogate
-    utf16.push_back(0xDE00); // low surrogate
-    REQUIRE(utf16_to_utf32(utf16) == U"😀");
+    utf16.push_back(char16_t(0xD83D)); // high surrogate
+    utf16.push_back(char16_t(0xDE00)); // low surrogate
+    REQUIRE(utf16_to_utf32(utf16) == U"\U0001F600"); // 😀
 
     // Invalid conversion (should throw an exception)
     std::u16string invalid_utf16;
@@ -395,11 +395,9 @@ TEST_CASE("UTF-8 to UTF-16 conversion tests", "[unicode]") {
     REQUIRE(utf8_to_utf16(u8"😀😁😂🤣😃😄😅😆") == u"😀😁😂🤣😃😄😅😆");
 
     // Edge cases
-    std::string utf8 = u8"\xF0\x9F\x98\x80"; // 😀
-    std::u16string expected_utf16;
-    expected_utf16.push_back(0xD83D); // high surrogate
-    expected_utf16.push_back(0xDE00); // low surrogate
-    REQUIRE(utf8_to_utf16(utf8) == expected_utf16);
+    std::string utf8 = "\xF0\x9F\x98\x80"; // 😀
+    std::u16string expected_utf16 = u"\xD83D\xDE00";
+    REQUIRE(utf8_to_utf16_fallback(utf8) == expected_utf16);
 
     // Invalid conversion (should throw an exception)
     std::string invalid_utf8 = "\xF0\x28\x8C\xBC"; // Invalid UTF-8 sequence
@@ -418,8 +416,8 @@ TEST_CASE("UTF-16 to UTF-8 conversion tests", "[unicode]") {
     std::u16string utf16;
     utf16.push_back(0xD83D); // high surrogate
     utf16.push_back(0xDE00); // low surrogate
-    REQUIRE(utf16_to_utf8(utf16) == u8"\xF0\x9F\x98\x80"); // 😀
-
+    REQUIRE(utf16_to_utf8(utf16) == "\xF0\x9F\x98\x80"); // 😀 
+  
     // Invalid conversion (should throw an exception)
     std::u16string invalid_utf16;
     invalid_utf16.push_back(0xD800); // lone high surrogate
@@ -435,7 +433,7 @@ TEST_CASE("UTF-8 to UTF-32 conversion tests", "[unicode]") {
     REQUIRE(utf8_to_utf32(u8"😀😁😂🤣😃😄😅😆") == U"😀😁😂🤣😃😄😅😆");
 
     // Edge cases
-    std::string utf8 = u8"\xF0\x9F\x98\x80"; // 😀
+    std::string utf8 = "\xF0\x9F\x98\x80"; // 😀
     REQUIRE(utf8_to_utf32(utf8) == U"\U0001F600");
 
     // Invalid conversion (should throw an exception)
@@ -453,7 +451,7 @@ TEST_CASE("UTF-32 to UTF-8 conversion tests", "[unicode]") {
 
     // Edge cases
     std::u32string utf32 = U"\U0001F600"; // 😀
-    REQUIRE(utf32_to_utf8(utf32) == u8"\xF0\x9F\x98\x80");
+    REQUIRE(utf32_to_utf8(utf32) == "\xF0\x9F\x98\x80");
 
     // Invalid conversion (should throw an exception)
     std::u32string invalid_utf32 = U"\x110000"; // Invalid code point
@@ -469,7 +467,7 @@ TEST_CASE("UTF-8 to wide string conversion tests", "[unicode]") {
     REQUIRE(utf8_to_wide(u8"😀😁😂🤣😃😄😅😆") == L"😀😁😂🤣😃😄😅😆");
 
     // Edge cases
-    std::string utf8 = u8"\xF0\x9F\x98\x80"; // 😀
+    std::string utf8 = "\xF0\x9F\x98\x80"; // 😀
     std::wstring expected_wide = L"\U0001F600";
     REQUIRE(utf8_to_wide(utf8) == expected_wide);
 
@@ -488,7 +486,7 @@ TEST_CASE("Wide string to UTF-8 conversion tests", "[unicode]") {
 
     // Edge cases
     std::wstring wide = L"\U0001F600"; // 😀
-    REQUIRE(wide_to_utf8(wide) == u8"\xF0\x9F\x98\x80");
+    REQUIRE(wide_to_utf8(wide) == "\xF0\x9F\x98\x80");
 
     // Invalid conversion (should throw an exception)
     std::wstring invalid_wide;
