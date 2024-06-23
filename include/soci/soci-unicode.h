@@ -1170,37 +1170,28 @@ namespace soci
 
       for (std::size_t i = 0; i < length;)
       {
-        if (length - i >= 32)
+        if (length - i >= 16)
         {
-          uint8x16_t chunk1 = vld1q_u8(bytes + i);
-          uint8x16_t chunk2 = vld1q_u8(bytes + i + 16);
+          uint8x16_t chunk = vld1q_u8(bytes + i);
           uint8x16_t mask = vdupq_n_u8(0x80);
-          uint8x16_t result1 = vceqq_u8(vandq_u8(chunk1, mask), vdupq_n_u8(0));
-          uint8x16_t result2 = vceqq_u8(vandq_u8(chunk2, mask), vdupq_n_u8(0));
-          uint64_t bitfield_lo1 = vgetq_lane_u64(vreinterpretq_u64_u8(result1), 0);
-          uint64_t bitfield_hi1 = vgetq_lane_u64(vreinterpretq_u64_u8(result1), 1);
-          uint64_t bitfield_lo2 = vgetq_lane_u64(vreinterpretq_u64_u8(result2), 0);
-          uint64_t bitfield_hi2 = vgetq_lane_u64(vreinterpretq_u64_u8(result2), 1);
-          uint64_t bitfield1 = bitfield_lo1 | (bitfield_hi1 << 8);
-          uint64_t bitfield2 = bitfield_lo2 | (bitfield_hi2 << 8);
+          uint8x16_t result = vceqq_u8(vandq_u8(chunk, mask), vdupq_n_u8(0));
+          uint64_t bitfield_lo = vgetq_lane_u64(vreinterpretq_u64_u8(result), 0);
+          uint64_t bitfield_hi = vgetq_lane_u64(vreinterpretq_u64_u8(result), 1);
+          uint64_t bitfield = bitfield_lo | (bitfield_hi << 8);
 
-          if (bitfield1 == 0xFFFFFFFFFFFFFFFF && bitfield2 == 0xFFFFFFFFFFFFFFFF)
+          if (bitfield == 0xFFFFFFFFFFFFFFFF)
           {
             // All characters in the chunk are ASCII
-            uint16x8_t chunk1_lo = vmovl_u8(vget_low_u8(chunk1));
-            uint16x8_t chunk1_hi = vmovl_u8(vget_high_u8(chunk1));
-            uint16x8_t chunk2_lo = vmovl_u8(vget_low_u8(chunk2));
-            uint16x8_t chunk2_hi = vmovl_u8(vget_high_u8(chunk2));
-            vst1q_u16(reinterpret_cast<uint16_t *>(&utf16[utf16.size()]), chunk1_lo);
-            vst1q_u16(reinterpret_cast<uint16_t *>(&utf16[utf16.size() + 8]), chunk1_hi);
-            vst1q_u16(reinterpret_cast<uint16_t *>(&utf16[utf16.size() + 16]), chunk2_lo);
-            vst1q_u16(reinterpret_cast<uint16_t *>(&utf16[utf16.size() + 24]), chunk2_hi);
-            utf16.resize(utf16.size() + 32);
-            i += 32;
+            uint16x8_t chunk_lo = vmovl_u8(vget_low_u8(chunk));
+            uint16x8_t chunk_hi = vmovl_u8(vget_high_u8(chunk));
+            vst1q_u16(reinterpret_cast<uint16_t *>(&utf16[utf16.size()]), chunk_lo);
+            vst1q_u16(reinterpret_cast<uint16_t *>(&utf16[utf16.size() + 8]), chunk_hi);
+            utf16.resize(utf16.size() + 16);
+            i += 16;
           }
           else
           {
-            // Handle non-ASCII characters with NEON
+            // Handle non-ASCII characters
             utf8_to_utf16_common(bytes + i, length - i, utf16);
             break;
           }
