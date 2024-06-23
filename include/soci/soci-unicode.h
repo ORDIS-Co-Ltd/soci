@@ -4,6 +4,7 @@
 #include "soci/error.h"
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include <wchar.h>
 
 // Include necessary headers based on the platform's capabilities for SIMD instructions
@@ -1296,12 +1297,13 @@ namespace soci
     inline std::u32string utf16_to_utf32_neon(const std::u16string &utf16)
     {
       std::u32string utf32;
-      utf32.reserve(utf16.size());
+      utf32.reserve(utf16.size()); // Reserve enough space initially
 
       const char16_t *chars = utf16.data();
       std::size_t length = utf16.length();
 
-      for (std::size_t i = 0; i < length;)
+      std::size_t i = 0;
+      while (i < length)
       {
         if (length - i >= 8)
         {
@@ -1313,11 +1315,17 @@ namespace soci
           if (bitfield == 0)
           {
             // No surrogates in the chunk, so we can directly convert the UTF-16 characters to UTF-32
-            uint32x4_t chunk_lo = vmovl_u16(vget_low_u16(chunk));
-            uint32x4_t chunk_hi = vmovl_u16(vget_high_u16(chunk));
-            vst1q_u32(reinterpret_cast<uint32_t *>(&utf32[utf32.size()]), chunk_lo);
-            vst1q_u32(reinterpret_cast<uint32_t *>(&utf32[utf32.size() + 4]), chunk_hi);
-            utf32.resize(utf32.size() + 8);
+            uint16x4_t chunk_lo = vget_low_u16(chunk);
+            uint16x4_t chunk_hi = vget_high_u16(chunk);
+            utf32.resize(utf32.size() + 8); // Resize once
+            utf32[utf32.size() - 8] = static_cast<char32_t>(vget_lane_u16(chunk_lo, 0));
+            utf32[utf32.size() - 7] = static_cast<char32_t>(vget_lane_u16(chunk_lo, 1));
+            utf32[utf32.size() - 6] = static_cast<char32_t>(vget_lane_u16(chunk_lo, 2));
+            utf32[utf32.size() - 5] = static_cast<char32_t>(vget_lane_u16(chunk_lo, 3));
+            utf32[utf32.size() - 4] = static_cast<char32_t>(vget_lane_u16(chunk_hi, 0));
+            utf32[utf32.size() - 3] = static_cast<char32_t>(vget_lane_u16(chunk_hi, 1));
+            utf32[utf32.size() - 2] = static_cast<char32_t>(vget_lane_u16(chunk_hi, 2));
+            utf32[utf32.size() - 1] = static_cast<char32_t>(vget_lane_u16(chunk_hi, 3));
             i += 8;
           }
           else
@@ -1355,38 +1363,228 @@ namespace soci
       const char32_t *chars = utf32.data();
       std::size_t length = utf32.length();
 
-      for (std::size_t i = 0; i < length;)
+      if (length >= 16)
       {
-        if (length - i >= 4)
+        // Process blocks of 16 characters
+        std::size_t i = 0;
+        for (; i + 16 <= length; i += 16)
         {
-          uint32x4_t chunk = vld1q_u32(reinterpret_cast<const uint32_t *>(chars + i));
-          uint32_t thres = 0xFFFF;
-          uint32x4_t mask = vcgtq_u32(chunk, vdupq_n_u32(thres));
-          uint64x2_t result = vreinterpretq_u64_u32(mask);
-          uint64_t combined = vgetq_lane_u64(result, 0) | vgetq_lane_u64(result, 1);
+          uint32x4_t chunk1 = vld1q_u32(reinterpret_cast<const uint32_t *>(chars + i));
+          uint32x4_t chunk2 = vld1q_u32(reinterpret_cast<const uint32_t *>(chars + i + 4));
+          uint32x4_t chunk3 = vld1q_u32(reinterpret_cast<const uint32_t *>(chars + i + 8));
+          uint32x4_t chunk4 = vld1q_u32(reinterpret_cast<const uint32_t *>(chars + i + 12));
+
+          uint32x4_t mask1 = vcgtq_u32(chunk1, vdupq_n_u32(0xFFFF));
+          uint32x4_t mask2 = vcgtq_u32(chunk2, vdupq_n_u32(0xFFFF));
+          uint32x4_t mask3 = vcgtq_u32(chunk3, vdupq_n_u32(0xFFFF));
+          uint32x4_t mask4 = vcgtq_u32(chunk4, vdupq_n_u32(0xFFFF));
+
+          uint64x2_t result1 = vreinterpretq_u64_u32(mask1);
+          uint64x2_t result2 = vreinterpretq_u64_u32(mask2);
+          uint64x2_t result3 = vreinterpretq_u64_u32(mask3);
+          uint64x2_t result4 = vreinterpretq_u64_u32(mask4);
+
+          uint64_t combined = vgetq_lane_u64(result1, 0) | vgetq_lane_u64(result1, 1) |
+                              vgetq_lane_u64(result2, 0) | vgetq_lane_u64(result2, 1) |
+                              vgetq_lane_u64(result3, 0) | vgetq_lane_u64(result3, 1) |
+                              vgetq_lane_u64(result4, 0) | vgetq_lane_u64(result4, 1);
 
           if (combined == 0)
           {
-            // No characters > 0xFFFF in the chunk
-            for (int j = 0; j < 4; ++j)
-            {
-              utf16.push_back(static_cast<char16_t>(chars[i + j]));
-            }
-            i += 4;
+            // All characters are <= 0xFFFF
+            uint16x8_t utf16_chunk1 = vcombine_u16(vmovn_u32(chunk1), vmovn_u32(chunk2));
+            uint16x8_t utf16_chunk2 = vcombine_u16(vmovn_u32(chunk3), vmovn_u32(chunk4));
+
+            char16_t temp[16];
+            vst1q_u16(reinterpret_cast<uint16_t *>(temp), utf16_chunk1);
+            vst1q_u16(reinterpret_cast<uint16_t *>(temp + 8), utf16_chunk2);
+            utf16.append(temp, 16);
           }
           else
           {
-            // Handle characters > 0xFFFF with NEON
-            // ... (NEON specific code)
-            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
-            utf32_to_utf16_common(chars + i, length - i, utf16);
-            break;
+            // Handle characters > 0xFFFF
+            auto process_chunk = [&utf16](uint32x4_t chunk)
+            {
+              char32_t ch0 = vgetq_lane_u32(chunk, 0);
+              char32_t ch1 = vgetq_lane_u32(chunk, 1);
+              char32_t ch2 = vgetq_lane_u32(chunk, 2);
+              char32_t ch3 = vgetq_lane_u32(chunk, 3);
+
+              for (char32_t ch : {ch0, ch1, ch2, ch3})
+              {
+                if (ch <= 0xFFFF)
+                {
+                  utf16.push_back(static_cast<char16_t>(ch));
+                }
+                else
+                {
+                  ch -= 0x10000;
+                  utf16.push_back(static_cast<char16_t>((ch >> 10) + 0xD800));
+                  utf16.push_back(static_cast<char16_t>((ch & 0x3FF) + 0xDC00));
+                }
+              }
+            };
+
+            process_chunk(chunk1);
+            process_chunk(chunk2);
+            process_chunk(chunk3);
+            process_chunk(chunk4);
           }
+        }
+
+        // Process remaining characters
+        for (; i < length; ++i)
+        {
+          char32_t ch = chars[i];
+          if (ch <= 0xFFFF)
+          {
+            utf16.push_back(static_cast<char16_t>(ch));
+          }
+          else
+          {
+            ch -= 0x10000;
+            utf16.push_back(static_cast<char16_t>((ch >> 10) + 0xD800));
+            utf16.push_back(static_cast<char16_t>((ch & 0x3FF) + 0xDC00));
+          }
+        }
+      }
+      else if (length >= 8)
+      {
+        // Process 8 characters using NEON
+        uint32x4_t chunk1 = vld1q_u32(reinterpret_cast<const uint32_t *>(chars));
+        uint32x4_t chunk2 = vld1q_u32(reinterpret_cast<const uint32_t *>(chars + 4));
+
+        uint32x4_t mask1 = vcgtq_u32(chunk1, vdupq_n_u32(0xFFFF));
+        uint32x4_t mask2 = vcgtq_u32(chunk2, vdupq_n_u32(0xFFFF));
+
+        uint64x2_t result1 = vreinterpretq_u64_u32(mask1);
+        uint64x2_t result2 = vreinterpretq_u64_u32(mask2);
+
+        uint64_t combined = vgetq_lane_u64(result1, 0) | vgetq_lane_u64(result1, 1) |
+                            vgetq_lane_u64(result2, 0) | vgetq_lane_u64(result2, 1);
+
+        if (combined == 0)
+        {
+          uint16x8_t utf16_chunk = vcombine_u16(vmovn_u32(chunk1), vmovn_u32(chunk2));
+          char16_t temp[8];
+          vst1q_u16(reinterpret_cast<uint16_t *>(temp), utf16_chunk);
+          utf16.append(temp, 8);
         }
         else
         {
-          utf32_to_utf16_common(chars + i, length - i, utf16);
-          break;
+          // Process each character individually
+          auto process_chunk = [&utf16](uint32x4_t chunk)
+          {
+            char32_t ch0 = vgetq_lane_u32(chunk, 0);
+            char32_t ch1 = vgetq_lane_u32(chunk, 1);
+            char32_t ch2 = vgetq_lane_u32(chunk, 2);
+            char32_t ch3 = vgetq_lane_u32(chunk, 3);
+
+            for (char32_t ch : {ch0, ch1, ch2, ch3})
+            {
+              if (ch <= 0xFFFF)
+              {
+                utf16.push_back(static_cast<char16_t>(ch));
+              }
+              else
+              {
+                ch -= 0x10000;
+                utf16.push_back(static_cast<char16_t>((ch >> 10) + 0xD800));
+                utf16.push_back(static_cast<char16_t>((ch & 0x3FF) + 0xDC00));
+              }
+            }
+          };
+
+          process_chunk(chunk1);
+          process_chunk(chunk2);
+        }
+
+        // Process remaining characters
+        for (std::size_t i = 8; i < length; ++i)
+        {
+          char32_t ch = chars[i];
+          if (ch <= 0xFFFF)
+          {
+            utf16.push_back(static_cast<char16_t>(ch));
+          }
+          else
+          {
+            ch -= 0x10000;
+            utf16.push_back(static_cast<char16_t>((ch >> 10) + 0xD800));
+            utf16.push_back(static_cast<char16_t>((ch & 0x3FF) + 0xDC00));
+          }
+        }
+      }
+      else if (length >= 4)
+      {
+        // Process 4 characters using NEON
+        uint32x4_t chunk = vld1q_u32(reinterpret_cast<const uint32_t *>(chars));
+        uint32x4_t mask = vcgtq_u32(chunk, vdupq_n_u32(0xFFFF));
+        uint64x2_t result = vreinterpretq_u64_u32(mask);
+        uint64_t combined = vgetq_lane_u64(result, 0) | vgetq_lane_u64(result, 1);
+
+        if (combined == 0)
+        {
+          uint16x4_t utf16_chunk = vmovn_u32(chunk);
+          char16_t temp[4];
+          vst1_u16(reinterpret_cast<uint16_t *>(temp), utf16_chunk);
+          utf16.append(temp, 4);
+        }
+        else
+        {
+          // Process each character individually
+          char32_t ch0 = vgetq_lane_u32(chunk, 0);
+          char32_t ch1 = vgetq_lane_u32(chunk, 1);
+          char32_t ch2 = vgetq_lane_u32(chunk, 2);
+          char32_t ch3 = vgetq_lane_u32(chunk, 3);
+
+          for (char32_t ch : {ch0, ch1, ch2, ch3})
+          {
+            if (ch <= 0xFFFF)
+            {
+              utf16.push_back(static_cast<char16_t>(ch));
+            }
+            else
+            {
+              ch -= 0x10000;
+              utf16.push_back(static_cast<char16_t>((ch >> 10) + 0xD800));
+              utf16.push_back(static_cast<char16_t>((ch & 0x3FF) + 0xDC00));
+            }
+          }
+        }
+
+        // Process remaining characters
+        for (std::size_t i = 4; i < length; ++i)
+        {
+          char32_t ch = chars[i];
+          if (ch <= 0xFFFF)
+          {
+            utf16.push_back(static_cast<char16_t>(ch));
+          }
+          else
+          {
+            ch -= 0x10000;
+            utf16.push_back(static_cast<char16_t>((ch >> 10) + 0xD800));
+            utf16.push_back(static_cast<char16_t>((ch & 0x3FF) + 0xDC00));
+          }
+        }
+      }
+      else
+      {
+        // Process all characters individually without NEON
+        for (std::size_t i = 0; i < length; ++i)
+        {
+          char32_t ch = chars[i];
+          if (ch <= 0xFFFF)
+          {
+            utf16.push_back(static_cast<char16_t>(ch));
+          }
+          else
+          {
+            ch -= 0x10000;
+            utf16.push_back(static_cast<char16_t>((ch >> 10) + 0xD800));
+            utf16.push_back(static_cast<char16_t>((ch & 0x3FF) + 0xDC00));
+          }
         }
       }
 
@@ -1408,6 +1606,8 @@ namespace soci
       const unsigned char *bytes = reinterpret_cast<const unsigned char *>(utf8.data());
       std::size_t length = utf8.length();
 
+      std::vector<char32_t> buffer(16); // Temporary buffer to hold 16 char32_t values
+
       for (std::size_t i = 0; i < length;)
       {
         if (length - i >= 16)
@@ -1422,17 +1622,26 @@ namespace soci
           if (bitfield == 0xFFFFFFFFFFFFFFFF)
           {
             // All characters in the chunk are ASCII
-            for (int j = 0; j < 16; ++j)
-            {
-              utf32.push_back(static_cast<char32_t>(bytes[i + j]));
-            }
+            uint8x16_t ascii_chars = vld1q_u8(bytes + i);
+            uint16x8_t lo_chars = vmovl_u8(vget_low_u8(ascii_chars));
+            uint16x8_t hi_chars = vmovl_u8(vget_high_u8(ascii_chars));
+            uint32x4_t lo_lo_chars = vmovl_u16(vget_low_u16(lo_chars));
+            uint32x4_t lo_hi_chars = vmovl_u16(vget_high_u16(lo_chars));
+            uint32x4_t hi_lo_chars = vmovl_u16(vget_low_u16(hi_chars));
+            uint32x4_t hi_hi_chars = vmovl_u16(vget_high_u16(hi_chars));
+
+            vst1q_u32(reinterpret_cast<uint32_t *>(buffer.data()), lo_lo_chars);
+            vst1q_u32(reinterpret_cast<uint32_t *>(buffer.data()) + 4, lo_hi_chars);
+            vst1q_u32(reinterpret_cast<uint32_t *>(buffer.data()) + 8, hi_lo_chars);
+            vst1q_u32(reinterpret_cast<uint32_t *>(buffer.data()) + 12, hi_hi_chars);
+
+            utf32.append(buffer.begin(), buffer.end());
+
             i += 16;
           }
           else
           {
             // Handle non-ASCII characters with NEON
-            // ... (NEON specific code)
-            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
             utf8_to_utf32_common(bytes + i, length - i, utf32);
             break;
           }
@@ -1470,6 +1679,8 @@ namespace soci
       const char32_t *chars = utf32.data();
       std::size_t length = utf32.length();
 
+      std::vector<char> buffer(16); // Temporary buffer to hold 16 UTF-8 bytes
+
       for (std::size_t i = 0; i < length;)
       {
         if (length - i >= 4)
@@ -1477,22 +1688,22 @@ namespace soci
           uint32x4_t chunk = vld1q_u32(reinterpret_cast<const uint32_t *>(chars + i));
           uint32x4_t mask = vdupq_n_u32(0x7F);
           uint32x4_t result = vceqq_u32(vandq_u32(chunk, mask), chunk);
-          uint64_t bitfield = vgetq_lane_u64(vreinterpretq_u64_u32(result), 0);
+          uint64_t bitfield = vgetq_lane_u64(vreinterpretq_u64_u32(result), 0) & 0xFFFFFFFF;
 
-          if (bitfield == 0xFFFFFFFFFFFFFFFF)
+          if (bitfield == 0xFFFFFFFF)
           {
-            // All characters in the chunk are ASCII
-            for (int j = 0; j < 4; ++j)
-            {
-              utf8.push_back(static_cast<char>(chars[i + j]));
-            }
+            char buffer[4];
+            buffer[0] = static_cast<char>(vgetq_lane_u32(chunk, 0));
+            buffer[1] = static_cast<char>(vgetq_lane_u32(chunk, 1));
+            buffer[2] = static_cast<char>(vgetq_lane_u32(chunk, 2));
+            buffer[3] = static_cast<char>(vgetq_lane_u32(chunk, 3));
+            utf8.append(buffer, 4);
+
             i += 4;
           }
           else
           {
             // Handle non-ASCII characters with NEON
-            // ... (NEON specific code)
-            // For simplicity, let's assume we handle the non-ASCII part here and then call the common function
             utf32_to_utf8_common(chars + i, length - i, utf8);
             break;
           }
